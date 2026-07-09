@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.DS_Store
+__MACOSX/
+
+# Runtime artifacts
+outputs/
+wandb/
+logs/
+
+# Large local data/checkpoints
+data/
+datasets/brisc2025/*.npy
+datasets/brisc2025/*.npz
+*.pth
+*.pt
+*.ckpt
