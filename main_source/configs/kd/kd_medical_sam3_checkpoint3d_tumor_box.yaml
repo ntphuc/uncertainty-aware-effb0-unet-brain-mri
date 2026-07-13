@@ -1,0 +1,81 @@
+# Primary config for the official checkpoint_3D.pt downloaded from Hugging Face.
+project_name: kd_medical_sam3_checkpoint3d_tumor_box
+seed: 42
+
+paths:
+  x_train: datasets/brisc2025/X_train.npy
+  y_train: datasets/brisc2025/Y_train.npy
+  x_test: datasets/brisc2025/X_test.npy
+  y_test: datasets/brisc2025/Y_test.npy
+  output_dir: outputs/kd_ablation/medical_sam3_checkpoint3d_tumor_box
+
+model:
+  name: efficientnet_b0_unet_boundary
+  encoder_name: efficientnet_b0
+  pretrained: true
+  in_channels: 1
+  num_classes: 1
+  decoder_channels: [256, 160, 96, 64, 32]
+  ms_channels: 24
+  use_multiscale: true
+  use_se: false
+  use_boundary_head: false
+  use_deep_supervision: false
+
+training:
+  image_size: 256
+  batch_size: 4        # teacher 10GB checkpoint usually needs smaller batch
+  num_workers: 2
+  epochs: 80
+  val_ratio: 0.15
+  learning_rate: 0.00025
+  weight_decay: 0.0001
+  amp: true
+  threshold: 0.5
+  save_every: 10
+  grad_clip: 1.0
+
+loss:
+  lambda_boundary: 0.10
+  beta_deep_supervision: 0.25
+  boundary_kernel_size: 3
+  gamma_tversky: 0.0
+
+kd:
+  enabled: true
+  lambda_kd: 0.75
+  alpha_logit: 0.45
+  alpha_dice: 0.35
+  alpha_boundary: 0.20
+  temperature: 1.0
+  teacher_output_type: logit
+  selective: true
+  confidence_threshold: 0.65
+  uncertainty_weighted: true
+  uncertainty_power: 1.0
+  boundary_kernel_size: 3
+
+teacher:
+  enabled: true
+  mode: external_callable      # external_callable | dummy
+  repo_path: external/Medical-SAM3       # TODO: path to Medical Samba/SAM3 repo
+  builder: sam3.model_builder:build_sam3_image_model   # TODO: edit to your repo builder
+  checkpoint: checkpoints/medical_sam3/checkpoint_3D.pt  # TODO: your 10GB checkpoint
+  output_type: logit           # logit if teacher returns mask logits, prob if probabilities
+  output_key: logits
+  freeze: true
+  prompt:
+    text: tumor
+    use_box: true
+    box_pad: 6
+    normalized_box: false
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  random_rotate90: true
+  lesion_crop_prob: 0.0       # keep 0 for online teacher so GT box prompt aligns with image
+  intensity_aug: true
+  noise_std: 0.02
+  contrast_range: [0.9, 1.1]
+  brightness_range: [-0.03, 0.03]

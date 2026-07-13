@@ -1,0 +1,57 @@
+# CPU/GPU smoke-test config. It uses a dummy teacher made from the GT mask.
+# Use only to test that the training loop works. Do NOT use for paper results.
+project_name: debug_dummy_teacher_kd
+seed: 42
+paths:
+  x_train: datasets/brisc2025/X_train.npy
+  y_train: datasets/brisc2025/Y_train.npy
+  x_test: datasets/brisc2025/X_test.npy
+  y_test: datasets/brisc2025/Y_test.npy
+  output_dir: outputs/debug_dummy_teacher_kd
+model:
+  name: efficientnet_b0_unet_boundary
+  encoder_name: efficientnet_b0
+  pretrained: false
+  in_channels: 1
+  num_classes: 1
+  decoder_channels: [64, 48, 32, 24, 16]
+  ms_channels: 8
+  use_multiscale: true
+  use_se: false
+  use_boundary_head: true
+  use_deep_supervision: true
+training:
+  image_size: 128
+  batch_size: 2
+  num_workers: 0
+  epochs: 1
+  val_ratio: 0.2
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  amp: false
+  threshold: 0.5
+  save_every: 1
+loss:
+  lambda_boundary: 0.10
+  beta_deep_supervision: 0.25
+  boundary_kernel_size: 3
+kd:
+  enabled: true
+  lambda_kd: 0.5
+  alpha_logit: 0.5
+  alpha_dice: 0.5
+  alpha_boundary: 0.0
+  teacher_output_type: logit
+  selective: true
+  confidence_threshold: 0.65
+  uncertainty_weighted: true
+teacher:
+  enabled: true
+  mode: dummy
+  output_type: logit
+  prompt: {text: tumor, use_box: true, box_pad: 6, normalized_box: false}
+augmentation:
+  horizontal_flip: true
+  random_rotate90: true
+  intensity_aug: false
+  lesion_crop_prob: 0.0
