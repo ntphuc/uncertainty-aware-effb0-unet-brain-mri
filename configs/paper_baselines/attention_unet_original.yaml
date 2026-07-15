@@ -1,31 +1,44 @@
-project_name: Baseline_VMUNet_Proxy
+project_name: Attention U-Net
+paper_name: Attention U-Net
+citation_key: oktay2018attention
+implementation: Local additive grid-attention gates on canonical U-Net skip connections
 seed: 42
+
 paths:
   x_train: datasets/brisc2025/X_train.npy
   y_train: datasets/brisc2025/Y_train.npy
   x_test: datasets/brisc2025/X_test.npy
   y_test: datasets/brisc2025/Y_test.npy
-  output_dir: outputs/baseline_vmunet_proxy
+  output_dir: outputs/paper_baselines/attention_unet_original
+
 model:
-  name: vmunet_proxy
+  name: attention_unet_original
   in_channels: 1
   num_classes: 1
   base_channels: 32
+  batch_norm: true
+
 training:
+  split_seed: 42
   image_size: 256
   batch_size: 8
+  accumulation_steps: 1
   num_workers: 2
   epochs: 50
   val_ratio: 0.15
   learning_rate: 0.0003
   weight_decay: 0.0001
   amp: true
+  deterministic: true
   threshold: 0.5
   save_every: 10
+
 loss:
   lambda_boundary: 0.0
   beta_deep_supervision: 0.0
   boundary_kernel_size: 3
+  gamma_tversky: 0.0
+
 augmentation:
   horizontal_flip: true
   vertical_flip: false

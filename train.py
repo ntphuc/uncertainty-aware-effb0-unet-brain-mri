@@ -35,7 +35,7 @@ def make_loaders(cfg):
     train_subset, val_subset = random_split(
         full_dataset,
         lengths=[train_len, val_len],
-        generator=torch.Generator().manual_seed(cfg.get("seed", 42)),
+        generator=torch.Generator().manual_seed(tcfg.get("split_seed", cfg.get("seed", 42))),
     )
 
     # Enable augmentation on the underlying dataset only during training would also affect val because random_split shares dataset.
@@ -95,23 +95,29 @@ def make_loaders(cfg):
     return train_loader, val_loader
 
 
-def train_one_epoch(model, loader, criterion, optimizer, scaler, device, amp=True, threshold=0.5):
+def train_one_epoch(model, loader, criterion, optimizer, scaler, device, amp=True, threshold=0.5, accumulation_steps=1):
     model.train()
     meters = {k: AverageMeter() for k in ["loss", "seg_loss", "tversky_loss", "component_weight_loss", "hard_negative_loss", "boundary_loss", "deep_loss", "dice", "iou", "precision", "recall", "f2"]}
 
-    for images, masks in tqdm(loader, desc="train", leave=False):
+    accumulation_steps = max(1, int(accumulation_steps))
+    optimizer.zero_grad(set_to_none=True)
+    num_batches = len(loader)
+    for step, (images, masks) in enumerate(tqdm(loader, desc="train", leave=False)):
         images = images.to(device, non_blocking=True)
         masks = masks.to(device, non_blocking=True)
 
-        optimizer.zero_grad(set_to_none=True)
         with torch.cuda.amp.autocast(enabled=amp):
             outputs = model(images)
             loss_dict = criterion(outputs, masks)
             loss = loss_dict["loss"]
+            scaled_loss = loss / accumulation_steps
 
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
+        scaler.scale(scaled_loss).backward()
+        should_step = ((step + 1) % accumulation_steps == 0) or ((step + 1) == num_batches)
+        if should_step:
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
 
         bs = images.size(0)
         meters["loss"].update(loss.item(), bs)
@@ -178,7 +184,10 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    set_seed(cfg.get("seed", 42))
+    set_seed(
+        cfg.get("seed", 42),
+        deterministic=bool(cfg.get("training", {}).get("deterministic", False)),
+    )
 
     out_dir = Path(cfg["paths"].get("output_dir", "outputs"))
     ckpt_dir = out_dir / "checkpoints"
@@ -243,7 +252,12 @@ def main():
     threshold = float(tcfg.get("threshold", 0.5))
 
     for epoch in range(1, epochs + 1):
-        train_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device, amp=amp, threshold=threshold)
+        train_metrics = train_one_epoch(
+            model, train_loader, criterion, optimizer, scaler, device,
+            amp=amp,
+            threshold=threshold,
+            accumulation_steps=tcfg.get("accumulation_steps", 1),
+        )
         val_metrics, first_batch = validate(model, val_loader, criterion, device, amp=amp, threshold=threshold)
         scheduler.step()
 

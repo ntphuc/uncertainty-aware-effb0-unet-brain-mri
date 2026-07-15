@@ -1,31 +1,46 @@
-project_name: Baseline_VMUNet_Proxy
+project_name: DeepLabV3+ (ResNet-50)
+paper_name: DeepLabV3+ (ResNet-50, OS=16)
+citation_key: chen2018deeplabv3plus
+implementation: Local DeepLabV3+ decoder and ASPP with torchvision ResNet-50 output-stride-16 encoder
 seed: 42
+
 paths:
   x_train: datasets/brisc2025/X_train.npy
   y_train: datasets/brisc2025/Y_train.npy
   x_test: datasets/brisc2025/X_test.npy
   y_test: datasets/brisc2025/Y_test.npy
-  output_dir: outputs/baseline_vmunet_proxy
+  output_dir: outputs/paper_baselines/deeplabv3plus_resnet50
+
 model:
-  name: vmunet_proxy
+  name: deeplabv3plus_resnet50
   in_channels: 1
   num_classes: 1
-  base_channels: 32
+  pretrained: false
+  aspp_channels: 256
+  low_level_channels: 48
+  atrous_rates: [6, 12, 18]
+
 training:
+  split_seed: 42
   image_size: 256
-  batch_size: 8
+  batch_size: 4
+  accumulation_steps: 2
   num_workers: 2
   epochs: 50
   val_ratio: 0.15
   learning_rate: 0.0003
   weight_decay: 0.0001
   amp: true
+  deterministic: true
   threshold: 0.5
   save_every: 10
+
 loss:
   lambda_boundary: 0.0
   beta_deep_supervision: 0.0
   boundary_kernel_size: 3
+  gamma_tversky: 0.0
+
 augmentation:
   horizontal_flip: true
   vertical_flip: false
