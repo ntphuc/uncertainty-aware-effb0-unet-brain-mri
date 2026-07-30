@@ -18,7 +18,9 @@ PY
 python -m pip install --upgrade packaging ninja
 # Modern mamba packages preserve the selective_scan_interface imported by the official code.
 # --no-build-isolation lets the build see the already-installed PyTorch/CUDA toolchain.
-python -m pip install --no-build-isolation "causal-conv1d>=1.4.0" "mamba-ssm>=2.2.2"
+# python -m pip install --no-build-isolation "causal-conv1d>=1.4.0" "mamba-ssm>=2.2.2"
+python -m  pip install https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.1.post4/causal_conv1d-1.6.1+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+python -m  pip install https://github.com/state-spaces/mamba/releases/download/v2.3.1/mamba_ssm-2.3.1+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
 
 mkdir -p external
 if [[ ! -d external/VM-UNet/.git ]]; then

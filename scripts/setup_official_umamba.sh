@@ -19,9 +19,10 @@ if not torch.cuda.is_available():
 PY
 
 python -m pip install --upgrade pip setuptools wheel packaging ninja
-python -m pip install "causal-conv1d>=1.2.0" --no-build-isolation
-python -m pip install mamba-ssm --no-build-isolation --no-cache-dir
-
+# python -m pip install "causal-conv1d>=1.2.0" --no-build-isolation
+# python -m pip install mamba-ssm --no-build-isolation --no-cache-dir
+python -m  pip install https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.1.post4/causal_conv1d-1.6.1+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+python -m  pip install https://github.com/state-spaces/mamba/releases/download/v2.3.1/mamba_ssm-2.3.1+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
 python - <<'PY'
 import torch
 from mamba_ssm import Mamba
