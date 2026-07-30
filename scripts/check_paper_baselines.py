@@ -22,6 +22,8 @@ CONFIGS = {
     "unetpp": "configs/paper_baselines/unetpp_original.yaml",
     "attention_unet": "configs/paper_baselines/attention_unet_original.yaml",
     "deeplabv3plus": "configs/paper_baselines/deeplabv3plus_resnet50.yaml",
+    "umamba_bot": "configs/paper_baselines/umamba_bot_official.yaml",
+    "umamba_enc": "configs/paper_baselines/umamba_enc_official.yaml",
     "vmunet": "configs/paper_baselines/vmunet_official.yaml",
 }
 
@@ -37,6 +39,9 @@ def main() -> None:
     failed = []
     for key in args.models:
         cfg = yaml.safe_load((ROOT / CONFIGS[key]).read_text(encoding="utf-8"))
+        cfg.setdefault("training", {})["image_size"] = int(args.image_size)
+        if key in {"umamba_bot", "umamba_enc"}:
+            cfg.setdefault("model", {})["input_size"] = int(args.image_size)
         try:
             model = build_model(cfg).to(device).eval()
             in_channels = int(cfg["model"].get("in_channels", 1))

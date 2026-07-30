@@ -211,3 +211,111 @@ def batch_surface_metrics_from_binary(preds: torch.Tensor, targets: torch.Tensor
         return float(arr.mean()) if len(arr) > 0 else float("inf")
 
     return {"hd95": finite_mean(hd95_values), "assd": finite_mean(assd_values), "boundary_f1": finite_mean(bf1_values)}
+
+
+def segmentation_metrics_per_sample_from_binary(
+    preds: torch.Tensor,
+    targets: torch.Tensor,
+    beta: float = 2.0,
+    eps: float = 1e-6,
+) -> Dict[str, List[float]]:
+    """Return one metric value per image instead of only a batch average.
+
+    This is used to report mean ± sample standard deviation across test cases.
+    HD95/ASSD keep ``inf`` for complete foreground mismatches; the evaluation
+    script reports how many non-finite cases were excluded from finite summary
+    statistics instead of silently treating them as ordinary distances.
+    """
+    preds = (preds > 0.5).float()
+    targets = (targets > 0.5).float()
+    dims = (1, 2, 3)
+
+    tp = torch.sum(preds * targets, dims)
+    fp = torch.sum(preds * (1.0 - targets), dims)
+    fn = torch.sum((1.0 - preds) * targets, dims)
+    intersection = tp
+    cardinality = torch.sum(preds + targets, dims)
+    union = cardinality - intersection
+
+    dice = (2.0 * intersection + eps) / (cardinality + eps)
+    iou = (intersection + eps) / (union + eps)
+    precision = (tp + eps) / (tp + fp + eps)
+    recall = (tp + eps) / (tp + fn + eps)
+    beta2 = beta ** 2
+    fbeta = (1.0 + beta2) * precision * recall / (beta2 * precision + recall + eps)
+
+    p_np = preds.detach().cpu().numpy() > 0.5
+    t_np = targets.detach().cpu().numpy() > 0.5
+    hd95_values: List[float] = []
+    assd_values: List[float] = []
+    boundary_f1_values: List[float] = []
+    for pred, target in zip(p_np, t_np):
+        pred_2d = pred[0]
+        target_2d = target[0]
+        hd95_values.append(hd95(pred_2d, target_2d))
+        assd_values.append(assd(pred_2d, target_2d))
+        boundary_f1_values.append(boundary_f1(pred_2d, target_2d))
+
+    return {
+        "dice": dice.detach().cpu().tolist(),
+        "iou": iou.detach().cpu().tolist(),
+        "precision": precision.detach().cpu().tolist(),
+        "recall": recall.detach().cpu().tolist(),
+        "f2": fbeta.detach().cpu().tolist(),
+        "hd95": hd95_values,
+        "assd": assd_values,
+        "boundary_f1": boundary_f1_values,
+    }
+
+
+def segmentation_metrics_per_sample_from_logits(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    threshold: float = 0.5,
+    beta: float = 2.0,
+    eps: float = 1e-6,
+) -> Dict[str, List[float]]:
+    probs = torch.sigmoid(logits)
+    preds = (probs > threshold).float()
+    return segmentation_metrics_per_sample_from_binary(
+        preds=preds,
+        targets=targets,
+        beta=beta,
+        eps=eps,
+    )
+
+
+def summarize_metric_values(values: List[float], ddof: int = 1) -> Dict[str, float | int | str]:
+    """Summarize metric values with mean, sample std, SEM and 95% CI half-width."""
+    arr = np.asarray(values, dtype=np.float64)
+    finite = arr[np.isfinite(arr)]
+    n_total = int(arr.size)
+    n_finite = int(finite.size)
+    n_nonfinite = n_total - n_finite
+    if n_finite == 0:
+        return {
+            "mean": float("inf"),
+            "std": float("nan"),
+            "sem": float("nan"),
+            "ci95_half_width": float("nan"),
+            "n": n_total,
+            "n_finite": 0,
+            "n_nonfinite": n_nonfinite,
+            "mean_pm_std": "NA",
+        }
+
+    mean = float(finite.mean())
+    effective_ddof = int(ddof) if n_finite > int(ddof) else 0
+    std = float(finite.std(ddof=effective_ddof))
+    sem = float(std / np.sqrt(n_finite)) if n_finite > 0 else float("nan")
+    ci95 = float(1.96 * sem)
+    return {
+        "mean": mean,
+        "std": std,
+        "sem": sem,
+        "ci95_half_width": ci95,
+        "n": n_total,
+        "n_finite": n_finite,
+        "n_nonfinite": n_nonfinite,
+        "mean_pm_std": f"{mean:.6f} ± {std:.6f}",
+    }

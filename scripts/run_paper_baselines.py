@@ -42,6 +42,8 @@ DEFAULT_CONFIGS: Dict[str, Path] = {
     "unetpp": Path("configs/paper_baselines/unetpp_original.yaml"),
     "attention_unet": Path("configs/paper_baselines/attention_unet_original.yaml"),
     "deeplabv3plus": Path("configs/paper_baselines/deeplabv3plus_resnet50.yaml"),
+    "umamba_bot": Path("configs/paper_baselines/umamba_bot_official.yaml"),
+    "umamba_enc": Path("configs/paper_baselines/umamba_enc_official.yaml"),
     "vmunet": Path("configs/paper_baselines/vmunet_official.yaml"),
 }
 METRICS = ["dice", "iou", "precision", "recall", "f2", "hd95", "assd", "boundary_f1"]
@@ -76,6 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--continue-on-error", action="store_true", help="Continue with other models after a failure")
     parser.add_argument("--no-postprocess", action="store_true", help="Force raw-model evaluation")
     parser.add_argument("--tta-scales", nargs="+", type=float, default=[1.0])
+    parser.add_argument("--std-ddof", type=int, choices=[0, 1], default=1, help="Per-case std convention used by evaluate.py")
     return parser.parse_args()
 
 
@@ -104,6 +107,11 @@ def collect_environment() -> dict:
         thop_version = getattr(thop, "__version__", None)
     except Exception:
         thop_version = None
+    try:
+        import mamba_ssm
+        mamba_ssm_version = getattr(mamba_ssm, "__version__", None)
+    except Exception:
+        mamba_ssm_version = None
 
     vm_repo = PROJECT_ROOT / "external" / "VM-UNet"
     vm_commit = None
@@ -123,6 +131,7 @@ def collect_environment() -> dict:
         "torch": torch.__version__,
         "torchvision": torchvision_version,
         "thop": thop_version,
+        "mamba_ssm": mamba_ssm_version,
         "cuda_available": torch.cuda.is_available(),
         "torch_cuda": torch.version.cuda,
         "cudnn": torch.backends.cudnn.version(),
@@ -220,6 +229,8 @@ def execute_one(model_key: str, seed: int, args: argparse.Namespace) -> RunRecor
             "test",
             "--tta-scales",
             *[str(x) for x in args.tta_scales],
+            "--std-ddof",
+            str(args.std_ddof),
         ]
         if args.no_postprocess:
             command.append("--no-postprocess")
@@ -258,6 +269,9 @@ def read_result(record: RunRecord) -> Optional[dict]:
     }
     for metric in METRICS:
         row[metric] = data.get(metric)
+        row[f"{metric}_case_std"] = data.get(f"{metric}_std")
+        row[f"{metric}_case_sem"] = data.get(f"{metric}_sem")
+        row[f"{metric}_case_ci95_half_width"] = data.get(f"{metric}_ci95_half_width")
     return row
 
 
@@ -267,23 +281,52 @@ def finite_values(series: pd.Series) -> np.ndarray:
 
 
 def aggregate_results(raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Aggregate seed means and keep the ± scope explicit.
+
+    * Multiple seeds: mean ± sample std across seed-level test means.
+    * One seed: mean ± per-case sample std produced by evaluate.py.
+
+    The fallback makes a one-seed run immediately useful while avoiding the
+    common mistake of presenting case variability as run-to-run variability.
+    """
     numeric_rows = []
     display_rows = []
     for (model_key, model), group in raw.groupby(["model_key", "model"], sort=False):
-        numeric = {"model_key": model_key, "model": model, "n_seeds": int(len(group))}
-        display = {"Model": model, "Seeds": int(len(group))}
+        n_seeds = int(len(group))
+        scope = "across seeds" if n_seeds > 1 else "across test cases"
+        numeric = {
+            "model_key": model_key,
+            "model": model,
+            "n_seeds": n_seeds,
+            "variability_scope": scope,
+        }
+        display = {"Model": model, "Seeds": n_seeds, "± scope": scope}
         for metric in METRICS + ["params_m", "gflops"]:
             vals = finite_values(group[metric]) if metric in group else np.array([])
             mean = float(vals.mean()) if len(vals) else math.nan
-            std = float(vals.std(ddof=1)) if len(vals) > 1 else 0.0 if len(vals) == 1 else math.nan
+            if len(vals) > 1:
+                std = float(vals.std(ddof=1))
+            elif len(vals) == 1 and metric in METRICS:
+                case_std_col = f"{metric}_case_std"
+                case_std_values = finite_values(group[case_std_col]) if case_std_col in group else np.array([])
+                std = float(case_std_values[0]) if len(case_std_values) else math.nan
+            elif len(vals) == 1:
+                std = 0.0
+            else:
+                std = math.nan
+
             numeric[f"{metric}_mean"] = mean
             numeric[f"{metric}_std"] = std
+            numeric[f"{metric}_std_scope"] = scope if metric in METRICS else "across seeds"
+
             if not np.isfinite(mean):
                 display_value = "NA"
-            elif metric in {"params_m", "gflops", "hd95", "assd"}:
+            elif metric in {"params_m", "gflops"}:
                 display_value = f"{mean:.3f}" if len(vals) == 1 else f"{mean:.3f} ± {std:.3f}"
+            elif metric in {"hd95", "assd"}:
+                display_value = f"{mean:.3f} ± {std:.3f}" if np.isfinite(std) else f"{mean:.3f}"
             else:
-                display_value = f"{mean:.4f}" if len(vals) == 1 else f"{mean:.4f} ± {std:.4f}"
+                display_value = f"{mean:.4f} ± {std:.4f}" if np.isfinite(std) else f"{mean:.4f}"
             label = {
                 "dice": "Dice ↑",
                 "iou": "IoU ↑",
@@ -340,7 +383,7 @@ def latex_table(df: pd.DataFrame) -> str:
     lines = [
         r"\begin{table*}[t]",
         r"\centering",
-        r"\caption{BRISC2025 test-set segmentation results. Values are mean $\pm$ standard deviation across seeds when multiple seeds are used.}",
+        r"\caption{BRISC2025 test-set segmentation results. The variability scope is stated explicitly: across seeds for repeated runs, or across test cases for a single-seed run.}",
         r"\label{tab:brisc2025_baselines}",
         rf"\begin{{tabular}}{{{alignment}}}",
         r"\toprule",

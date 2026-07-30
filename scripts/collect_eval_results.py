@@ -10,6 +10,8 @@ CONFIGS = [
     "configs/baseline_transunet.yaml",
     "configs/baseline_umamba.yaml",
     "configs/baseline_vmunet.yaml",
+    "configs/paper_baselines/umamba_bot_official.yaml",
+    "configs/paper_baselines/umamba_enc_official.yaml",
     "configs/efficient_b0_multiscale_no_se.yaml",
     "configs/efficient_b0_multiscale_boundary_no_se.yaml",
 ]
@@ -27,10 +29,15 @@ for cfg_path in CONFIGS:
         "model": cfg["project_name"],
         "config": cfg_path,
         "dice": data.get("dice"),
+        "dice_std": data.get("dice_std"),
         "iou": data.get("iou"),
+        "iou_std": data.get("iou_std"),
         "hd95": data.get("hd95"),
+        "hd95_std": data.get("hd95_std"),
         "assd": data.get("assd"),
+        "assd_std": data.get("assd_std"),
         "boundary_f1": data.get("boundary_f1"),
+        "boundary_f1_std": data.get("boundary_f1_std"),
         "params": data.get("params"),
         "gflops": data.get("gflops"),
         "checkpoint_epoch": data.get("checkpoint_epoch"),
@@ -40,7 +47,7 @@ for cfg_path in CONFIGS:
 
 out_path = Path("outputs/core_baseline_summary.csv")
 out_path.parent.mkdir(parents=True, exist_ok=True)
-fields = ["model", "config", "dice", "iou", "hd95", "assd", "boundary_f1", "params", "gflops", "checkpoint_epoch", "checkpoint_best_dice"]
+fields = ["model", "config", "dice", "dice_std", "iou", "iou_std", "hd95", "hd95_std", "assd", "assd_std", "boundary_f1", "boundary_f1_std", "params", "gflops", "checkpoint_epoch", "checkpoint_best_dice"]
 with open(out_path, "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(f, fieldnames=fields)
     writer.writeheader()

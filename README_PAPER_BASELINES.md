@@ -1,4 +1,4 @@
-# BRISC2025 — five non-proxy segmentation baselines
+# BRISC2025 — seven non-proxy segmentation baselines
 
 This extension adds one reproducible benchmark runner for:
 
@@ -6,11 +6,13 @@ This extension adds one reproducible benchmark runner for:
 2. **U-Net++** — nested dense skip pathways with deep supervision.
 3. **Attention U-Net** — additive attention gates on U-Net skip connections.
 4. **DeepLabV3+** — ResNet-50 encoder, output stride 16, ASPP and separable decoder.
-5. **VM-UNet** — the authors' official `VSSM` implementation loaded directly from
+5. **U-Mamba_Bot** — residual CNN encoder/decoder with the official `mamba_ssm` block only at the bottleneck.
+6. **U-Mamba_Enc** — residual CNN encoder/decoder with the official `mamba_ssm` block on alternating encoder stages, including the bottleneck.
+7. **VM-UNet** — the authors' official `VSSM` implementation loaded directly from
    `JCruan519/VM-UNet`; it is not the convolutional proxy previously present in
    this repository.
 
-All five models expose raw binary-segmentation logits through the repository's
+All seven models expose raw binary-segmentation logits through the repository's
 standard output contract:
 
 ```python
@@ -29,9 +31,11 @@ The adapter does not replace any VM-UNet VSS/selective-scan block. It only:
 
 ```text
 models/original_baselines.py          # U-Net, U-Net++, Attention U-Net, DeepLabV3+
+models/official_umamba.py             # U-Mamba_Bot and U-Mamba_Enc standalone adapters
 models/official_vmunet.py             # direct adapter for authors' VM-UNet VSSM
 models/__init__.py                    # model factory names
 configs/paper_baselines/*.yaml        # matched benchmark configurations
+scripts/setup_official_umamba.sh      # install U-Mamba selective-scan dependencies
 scripts/setup_official_vmunet.sh      # clone/install official VM-UNet dependencies
 scripts/check_paper_baselines.py      # architecture forward-pass smoke test
 scripts/run_paper_baselines.py        # train/evaluate/aggregate all models
@@ -39,8 +43,8 @@ scripts/run_paper_baselines.sh        # shell wrapper
 paper_references.bib                  # model and dataset citations
 ```
 
-The old proxy is retained only for backward compatibility under the explicit
-name `vmunet_proxy`; it is excluded from the paper runner.
+The old proxies are retained only for backward compatibility under the explicit
+names `umamba` and `vmunet_proxy`; both are excluded from the paper runner.
 
 ## 2. Expected BRISC2025 files
 
@@ -72,7 +76,22 @@ python scripts/check_paper_baselines.py \
   --image-size 256
 ```
 
-## 4. Install official VM-UNet
+
+## 4. Install U-Mamba and official VM-UNet
+
+Both Mamba-based baselines require CUDA selective-scan dependencies. Install U-Mamba support with:
+
+```bash
+bash scripts/setup_official_umamba.sh
+```
+
+Verify U-Mamba:
+
+```bash
+python scripts/check_paper_baselines.py --models umamba_bot umamba_enc --device cuda --image-size 256
+```
+
+### VM-UNet setup
 
 VM-UNet requires the CUDA selective-scan implementation from `mamba-ssm`.
 Run on a Linux machine with a compatible NVIDIA CUDA/PyTorch toolchain:
@@ -175,7 +194,7 @@ The terminal and publication tables include:
 - trainable parameters in millions;
 - GFLOPs at the configured input size when THOP supports every model operation.
 
-For multiple seeds, values are reported as mean ± sample standard deviation.
+For multiple seeds, values are reported as mean ± sample standard deviation across seeds. For a one-seed run, the table uses the per-case sample standard deviation written by `evaluate.py` and labels the variability scope explicitly. Per-case CSV files are saved beside each JSON result.
 VM-UNet GFLOPs can appear as `NA` when the installed THOP version has no handler
 for the custom selective-scan CUDA operator; the script intentionally does not
 invent an estimate.

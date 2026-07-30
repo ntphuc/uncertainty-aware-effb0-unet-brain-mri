@@ -1,0 +1,4 @@
+# Install after requirements.txt on Linux with a compatible NVIDIA CUDA/PyTorch toolchain.
+# These packages provide the official selective-scan kernels used by U-Mamba.
+causal-conv1d>=1.2.0
+mamba-ssm

@@ -3,6 +3,7 @@ from .unet import UNet
 from .unetpp import UNetPlusPlus
 from .transunet import TransUNet
 from .umamba import UMamba
+from .official_umamba import UMambaBot2D, UMambaEnc2D
 from .vmunet import VMUNet as VMUNetProxy
 from .original_baselines import (
     OriginalUNet,
@@ -29,6 +30,8 @@ def build_model(cfg):
       - attention_unet_original
       - deeplabv3plus_resnet50
       - vmunet_official (or vmunet)
+      - umamba_bot_official
+      - umamba_enc_official
 
     Legacy/custom model.name values:
       - efficientnet_b0_unet_boundary
@@ -86,6 +89,36 @@ def build_model(cfg):
             aspp_channels=m.get("aspp_channels", 256),
             low_level_channels=m.get("low_level_channels", 48),
             atrous_rates=m.get("atrous_rates", [6, 12, 18]),
+        )
+
+    if name in ["umamba_bot_official", "u-mamba-bot", "umamba-bot", "umamba_bot"]:
+        return UMambaBot2D(
+            **common,
+            input_size=m.get("input_size", cfg.get("training", {}).get("image_size", 256)),
+            channels=m.get("channels", [32, 64, 128, 256, 320, 320]),
+            strides=m.get("strides", [1, 2, 2, 2, 2, 2]),
+            encoder_blocks=m.get("encoder_blocks", 2),
+            decoder_blocks=m.get("decoder_blocks", 2),
+            d_state=m.get("d_state", 16),
+            d_conv=m.get("d_conv", 4),
+            expand=m.get("expand", 2),
+            deep_supervision=m.get("use_deep_supervision", False),
+            conv_bias=m.get("conv_bias", True),
+        )
+
+    if name in ["umamba_enc_official", "u-mamba-enc", "umamba-enc", "umamba_enc"]:
+        return UMambaEnc2D(
+            **common,
+            input_size=m.get("input_size", cfg.get("training", {}).get("image_size", 256)),
+            channels=m.get("channels", [32, 64, 128, 256, 320, 320]),
+            strides=m.get("strides", [1, 2, 2, 2, 2, 2]),
+            encoder_blocks=m.get("encoder_blocks", 2),
+            decoder_blocks=m.get("decoder_blocks", 2),
+            d_state=m.get("d_state", 16),
+            d_conv=m.get("d_conv", 4),
+            expand=m.get("expand", 2),
+            deep_supervision=m.get("use_deep_supervision", False),
+            conv_bias=m.get("conv_bias", True),
         )
 
     if name in ["vmunet_official", "vm-unet-official", "vmunet", "vm-unet", "vm_unet"]:

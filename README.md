@@ -240,7 +240,7 @@ Paper baseline summary:
 
 ### Note on U-Mamba and VM-UNet
 
-`models/umamba.py` and `models/vmunet.py` are runnable proxy baselines implemented inside the same PyTorch pipeline. They do not depend on `mamba_ssm`, selective-scan CUDA kernels, or official external repositories. If you want to claim comparison against official U-Mamba or official VM-UNet, run the official repositories separately and report them as external baselines.
+`models/umamba.py` and `models/vmunet.py` remain runnable proxy baselines. The repository now also includes `models/official_umamba.py` for U-Mamba_Bot and U-Mamba_Enc using the real `mamba_ssm` operator, plus `models/official_vmunet.py` for the official VM-UNet adapter. Use the explicit paper-baseline configs and clearly distinguish proxies from official-architecture adapters.
 
 ---
 
@@ -383,7 +383,7 @@ python infer.py \
 - MRI images are normalized with z-score normalization inside `NPYSliceDataset`.
 - Dataset arrays and model checkpoints are not included in this repository.
 - The code is designed for binary tumor segmentation from BRISC2025-style `.npy` arrays.
-- U-Mamba and VM-UNet are proxy implementations for fair in-pipeline comparison, not official reproductions.
+- Legacy `umamba` and `vmunet_proxy` remain proxies. Use `umamba_bot_official`, `umamba_enc_official`, and `vmunet_official` for the non-proxy paper baseline runner.
 
 ---
 

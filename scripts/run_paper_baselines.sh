@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-command runner for the five non-proxy BRISC2025 baselines.
+# One-command runner for the seven non-proxy BRISC2025 baselines.
 # Forward any CLI arguments to scripts/run_paper_baselines.py.
 # Examples:
 #   bash scripts/run_paper_baselines.sh --stage train_eval --device cuda
