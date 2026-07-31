@@ -20,9 +20,9 @@ model:
   - 32
   ms_channels: 24
   use_multiscale: true
-  use_se: true
+  use_se: false
   use_boundary_head: true
-  use_deep_supervision: false
+  use_deep_supervision: true
 training:
   image_size: 256
   batch_size: 8
@@ -36,7 +36,7 @@ training:
   save_every: 10
 loss:
   lambda_boundary: 0.15
-  beta_deep_supervision: 0.0
+  beta_deep_supervision: 0.25
   boundary_kernel_size: 3
 augmentation:
   horizontal_flip: true

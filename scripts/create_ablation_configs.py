@@ -19,9 +19,12 @@ EXPERIMENTS = {
         "model": {"use_multiscale": True, "use_se": True, "use_boundary_head": False, "use_deep_supervision": False},
         "loss": {"lambda_boundary": 0.0, "beta_deep_supervision": 0.0},
     },
+    # Boundary ablation must not include SE; otherwise rows m4 and m5 do not
+    # match the paper labels. Deep supervision is kept together with the
+    # boundary branch in both rows, so m5 isolates the additional SE module.
     "m4_boundary": {
-        "model": {"use_multiscale": True, "use_se": True, "use_boundary_head": True, "use_deep_supervision": False},
-        "loss": {"lambda_boundary": 0.15, "beta_deep_supervision": 0.0},
+        "model": {"use_multiscale": True, "use_se": False, "use_boundary_head": True, "use_deep_supervision": True},
+        "loss": {"lambda_boundary": 0.15, "beta_deep_supervision": 0.25},
     },
     "m5_full": {
         "model": {"use_multiscale": True, "use_se": True, "use_boundary_head": True, "use_deep_supervision": True},

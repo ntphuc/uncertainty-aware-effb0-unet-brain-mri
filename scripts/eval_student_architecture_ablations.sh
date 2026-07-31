@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 SPLIT="${SPLIT:-test}"
 DEVICE="${DEVICE:-cuda}"
 STRICT="${STRICT:-0}"
+STD_DDOF="${STD_DDOF:-1}"
 
 CONFIGS=(
   "configs/ablations/m1_effb0_unet.yaml"
@@ -41,13 +42,17 @@ PY
     --config "$config" \
     --checkpoint "$checkpoint" \
     --split "$SPLIT" \
-    --device "$DEVICE"
+    --device "$DEVICE" \
+    --std-ddof "$STD_DDOF"
 done
 
 if find outputs/ablations -path '*/eval/test_results.json' -print -quit 2>/dev/null | grep -q .; then
   python scripts/summarize_ablations.py \
     --ablations_dir outputs/ablations \
-    --output_csv outputs/ablations/all_summary.csv
+    --std-ddof "$STD_DDOF" \
+    --output_csv outputs/ablations/table4_ablation_with_std.csv \
+    --output_md outputs/ablations/table4_ablation_with_std.md \
+    --output_tex outputs/ablations/table4_ablation_with_std.tex
 else
   echo "No architecture-ablation evaluation results found."
 fi

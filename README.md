@@ -205,6 +205,14 @@ The paper reports the following ablation summary:
 | EffB0 MultiScale + Boundary | 0.8736 | 0.8052 | 7.4557 | 2.6146 | 0.8607 | 6.92 | 4.57 |
 | EffB0 MultiScale + Boundary + SE | 0.8753 | 0.8075 | 7.0762 | 2.5704 | 0.8624 | 6.92 | 4.57 |
 
+To regenerate this table with per-case sample standard deviation for Dice, IoU, HD95, ASSD, and B-F1:
+
+```bash
+DEVICE=cuda TRAIN=1 EVAL=1 STD_DDOF=1 bash scripts/run_ablation.sh
+```
+
+The export files are written to `outputs/ablations/table4_ablation_with_std.{csv,md,tex}`. For paper-level deviation across independent runs, use `python scripts/run_ablation_multiseed.py --seeds 42 43 44 --device cuda`. See `README_ABLATION_STD.md` for details.
+
 ---
 
 ## Baseline Comparison
