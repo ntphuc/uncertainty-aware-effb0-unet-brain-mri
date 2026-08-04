@@ -1,5 +1,7 @@
 import argparse
 import csv
+import hashlib
+import json
 from pathlib import Path
 
 import torch
@@ -28,6 +30,44 @@ METRIC_NAMES = [
     "assd",
     "boundary_f1",
 ]
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_selection_lock(config_path: Path, checkpoint_path: Path, lock_path: Path) -> dict:
+    """Verify that a factorial test evaluation occurs only after validation lock."""
+    if not lock_path.exists():
+        raise FileNotFoundError(
+            f"Required validation selection lock not found: {lock_path}. "
+            "Do not evaluate the test set before architecture selection is frozen."
+        )
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    config_resolved = config_path.resolve()
+    checkpoint_resolved = checkpoint_path.resolve()
+    matching = []
+    for record in lock.get("all_locked_files", []):
+        if (
+            Path(record["config"]).resolve() == config_resolved
+            and Path(record["checkpoint"]).resolve() == checkpoint_resolved
+        ):
+            matching.append(record)
+    if len(matching) != 1:
+        raise RuntimeError(
+            "Config/checkpoint pair is not present exactly once in the selection lock: "
+            f"{config_path}, {checkpoint_path}"
+        )
+    record = matching[0]
+    if _sha256_file(config_path) != record["config_sha256"]:
+        raise RuntimeError(f"Config changed after architecture lock: {config_path}")
+    if _sha256_file(checkpoint_path) != record["checkpoint_sha256"]:
+        raise RuntimeError(f"Checkpoint changed after architecture lock: {checkpoint_path}")
+    return lock
 
 
 def save_per_case_csv(rows, output_path: Path) -> None:
@@ -71,6 +111,11 @@ def main():
     cfg = load_config(args.config)
     device = torch.device(args.device)
     paths = cfg["paths"]
+    lock_info = None
+    eval_cfg = cfg.get("evaluation", {})
+    if args.split == "test" and bool(eval_cfg.get("require_selection_lock_for_test", False)):
+        lock_path = Path(eval_cfg.get("selection_lock", "outputs/factorial/selection/SELECTION_LOCK.json"))
+        lock_info = verify_selection_lock(Path(args.config), Path(args.checkpoint), lock_path)
     tcfg = cfg["training"]
     mcfg = cfg["model"]
 
@@ -195,6 +240,22 @@ def main():
     results.update({f"post_{key}": value for key, value in post_stats.items()})
     results["checkpoint_epoch"] = ckpt.get("epoch")
     results["checkpoint_best_dice"] = ckpt.get("best_dice")
+    results["checkpoint_best_validation_metrics"] = ckpt.get("best_validation_metrics")
+    results["checkpoint_selection_policy"] = ckpt.get("checkpoint_selection_policy")
+    results["checkpoint_selection_reason"] = ckpt.get("selection_reason")
+    results["validation_metric_policy"] = ckpt.get("validation_metric_policy")
+    results["split_sha256"] = ckpt.get("split_sha256")
+    results["checkpoint_selection_source"] = "validation only"
+    if lock_info is not None:
+        results["selection_lock_verified"] = True
+        results["selection_lock_selected_variant"] = lock_info.get("selected_variant")
+        results["test_interpretation"] = (
+            "confirmatory selected-model evaluation"
+            if cfg.get("experiment", {}).get("variant") == lock_info.get("selected_variant")
+            else "post-lock ablation evaluation; not used for architecture selection"
+        )
+    else:
+        results["selection_lock_verified"] = False
 
     out_dir = Path(paths.get("output_dir", "outputs")) / "eval"
     out_dir.mkdir(parents=True, exist_ok=True)

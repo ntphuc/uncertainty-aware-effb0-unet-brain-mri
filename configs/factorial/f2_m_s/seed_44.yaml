@@ -1,11 +1,11 @@
 project_name: BE_UNet_EfficientB0_Boundary
-seed: 42
+seed: 44
 paths:
   x_train: datasets/brisc2025/X_train.npy
   y_train: datasets/brisc2025/Y_train.npy
   x_test: datasets/brisc2025/X_test.npy
   y_test: datasets/brisc2025/Y_test.npy
-  output_dir: outputs
+  output_dir: outputs/factorial/f2_m_s/seed_44
 model:
   name: efficientnet_b0_unet_boundary
   encoder_name: efficientnet_b0
@@ -20,9 +20,9 @@ model:
   - 32
   ms_channels: 24
   use_multiscale: true
-  use_se: false
-  use_boundary_head: true
-  use_deep_supervision: true
+  use_se: true
+  use_boundary_head: false
+  use_deep_supervision: false
 training:
   image_size: 256
   batch_size: 8
@@ -57,10 +57,23 @@ training:
     min_epoch: 1
   validation_empty_surface_penalty: image_diagonal
 loss:
-  lambda_boundary: 0.15
-  beta_deep_supervision: 0.25
+  lambda_boundary: 0.0
+  beta_deep_supervision: 0.0
   boundary_kernel_size: 3
 augmentation:
   horizontal_flip: true
   vertical_flip: false
   random_rotate90: true
+experiment:
+  family: validation_locked_factorial_ablation
+  variant: f2_m_s
+  factors:
+    multiscale: 1
+    skip_se: 1
+    boundary: 0
+    deep_supervision: 0
+  training_seed: 44
+  split_seed: 42
+evaluation:
+  require_selection_lock_for_test: true
+  selection_lock: outputs/factorial/selection/SELECTION_LOCK.json
