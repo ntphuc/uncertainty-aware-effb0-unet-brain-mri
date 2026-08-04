@@ -45,7 +45,19 @@ def build_model(cfg):
     name = str(m.get("name", "efficientnet_b0_unet_boundary")).lower()
     common = _common_model_kwargs(m)
 
-    if name in ["efficientnet_b0_unet_boundary", "effb0_unet", "be_unet"]:
+    if name in [
+        "efficientnet_b0_unet_boundary",
+        "effb0_unet",
+        "be_unet",
+        "efficientnet_b0_unet_rgamf",
+        "effb0_rgamf",
+        "rgamf_unet",
+    ]:
+        default_fusion_type = (
+            "rgamf"
+            if name in {"efficientnet_b0_unet_rgamf", "effb0_rgamf", "rgamf_unet"}
+            else "concat"
+        )
         return EfficientB0UNetBoundary(
             encoder_name=m.get("encoder_name", "efficientnet_b0"),
             pretrained=m.get("pretrained", True),
@@ -54,6 +66,11 @@ def build_model(cfg):
             decoder_channels=m.get("decoder_channels", [256, 160, 96, 64, 32]),
             ms_channels=m.get("ms_channels", 24),
             use_multiscale=m.get("use_multiscale", True),
+            fusion_type=m.get("fusion_type", default_fusion_type),
+            rgamf_channels=m.get("rgamf_channels", 64),
+            rgamf_hidden_channels=m.get("rgamf_hidden_channels", 32),
+            rgamf_temperature=m.get("rgamf_temperature", 1.0),
+            expected_encoder_channels=m.get("expected_encoder_channels", None),
             use_se=m.get("use_se", True),
             use_boundary_head=m.get("use_boundary_head", True),
             use_deep_supervision=m.get("use_deep_supervision", True),

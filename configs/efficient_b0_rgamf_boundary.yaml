@@ -1,0 +1,75 @@
+project_name: RGAMF_UNet_EfficientB0_Boundary
+seed: 42
+
+paths:
+  x_train: datasets/brisc2025/X_train.npy
+  y_train: datasets/brisc2025/Y_train.npy
+  x_test: datasets/brisc2025/X_test.npy
+  y_test: datasets/brisc2025/Y_test.npy
+  output_dir: outputs/rgamf
+
+model:
+  name: efficientnet_b0_unet_rgamf
+  encoder_name: efficientnet_b0
+  pretrained: true
+  in_channels: 1
+  num_classes: 1
+  decoder_channels: [256, 160, 96, 64, 32]
+
+  use_multiscale: true
+  fusion_type: rgamf
+  rgamf_channels: 64
+  rgamf_hidden_channels: 32
+  rgamf_temperature: 1.0
+
+  # Leave unset by default because timm feature channels depend on the exact
+  # model/version and feature taps. To enforce the paper assumption, uncomment:
+  # expected_encoder_channels: [24, 40, 80, 112, 320]
+
+  use_se: true
+  use_boundary_head: true
+  use_deep_supervision: true
+
+training:
+  image_size: 256
+  batch_size: 8
+  num_workers: 2
+  epochs: 50
+  val_ratio: 0.15
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  amp: true
+  threshold: 0.5
+  save_every: 10
+  split_seed: 42
+  deterministic: true
+  checkpoint_selection:
+    primary:
+      metric: dice
+      mode: max
+      tolerance: 0.001
+    tie_breakers:
+      - metric: missing_prediction_rate
+        mode: min
+        tolerance: 0.0
+      - metric: hd95
+        mode: min
+        tolerance: 0.0
+      - metric: assd
+        mode: min
+        tolerance: 0.0
+      - metric: boundary_f1
+        mode: max
+        tolerance: 0.0
+    min_epoch: 1
+  validation_empty_surface_penalty: image_diagonal
+
+loss:
+  lambda_boundary: 0.15
+  beta_deep_supervision: 0.25
+  boundary_kernel_size: 3
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  random_rotate90: true

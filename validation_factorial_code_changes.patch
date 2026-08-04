@@ -1,0 +1,2139 @@
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/CHANGES_VALIDATION_FACTORIAL.md /mnt/data/archive_review/CHANGES_VALIDATION_FACTORIAL.md
+--- /mnt/data/archive_original/CHANGES_VALIDATION_FACTORIAL.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/archive_review/CHANGES_VALIDATION_FACTORIAL.md	2026-08-03 10:02:22.623616140 +0000
+@@ -0,0 +1,83 @@
++# Changes: Validation-Locked Selection and Factorial Ablation
++
++## Modified files
++
++### `train.py`
++
++- Replaced seed-dependent `random_split` behavior with a fixed split controlled by `training.split_seed`.
++- Saves exact split indices and SHA-256 to `data_split.json`.
++- Uses independent train and validation dataset objects.
++- Added per-case validation metrics rather than batch-level surface averaging.
++- Added missing-prediction count/rate.
++- Added explicit finite penalty for undefined HD95/ASSD during validation selection.
++- Added configurable, pre-specified checkpoint-selection policy.
++- Saves `best_validation.pth`, `validation_best.json`, and `checkpoint_selection.csv`.
++- Stores validation metrics, policy, split hash, and selection reason in checkpoints.
++- Preserves legacy `best.pth` for compatibility.
++
++### `evaluate.py`
++
++- Stores validation-selection provenance in test result JSON.
++- Added optional strict test guard for factorial configs.
++- Verifies `SELECTION_LOCK.json` and SHA-256 hashes before test evaluation.
++- Labels selected-model evaluation versus post-lock ablation evaluation.
++
++### `configs/efficient_b0_boundary.yaml`
++
++- Added fixed `split_seed`.
++- Added deterministic setting.
++- Added explicit empty-surface penalty policy.
++- Added pre-specified checkpoint-selection policy.
++
++## New files
++
++### `utils/selection.py`
++
++Reusable lexicographic validation-selection logic with finite-value handling.
++
++### `scripts/create_factorial_ablation_configs.py`
++
++Generates one Base anchor plus the complete 2×2×2 S/B/D factorial with MultiScale enabled, for all declared seeds.
++
++### `scripts/run_factorial_train_validation.py`
++
++Runs training/validation only; never invokes test evaluation.
++
++### `scripts/select_architecture_from_validation.py`
++
++Aggregates validation results across seeds, selects an architecture, and writes an immutable SHA-256 selection lock.
++
++### `scripts/evaluate_factorial_after_lock.py`
++
++Evaluates either the selected model or all post-lock ablation cells only after lock verification.
++
++### `scripts/summarize_factorial_results.py`
++
++Creates seed-level summaries, mean ± SD tables, and paired factorial main effects/interactions.
++
++### `tests/test_validation_selection.py`
++
++Unit tests for the pre-specified selection rule.
++
++### `configs/factorial/`
++
++Pre-generated 27 run configs and one experiment manifest.
++
++### `README_VALIDATION_SELECTION_FACTORIAL.md`
++
++Full Vietnamese execution and reporting guide.
++
++## Methodological corrections achieved
++
++1. Test data are no longer needed for checkpoint or architecture selection.
++2. Every run uses the same validation cases.
++3. The architecture decision is cryptographically frozen before test evaluation.
++4. Boundary and deep supervision are independently enabled/disabled.
++5. Skip-SE interactions with both supervision mechanisms can be estimated.
++6. Results are summarized across all declared seeds rather than a favorable single seed.
++
++## Additional code-audit findings
++
++- Normalization in `NPYSliceDataset` is per-slice z-score, not dataset-level z-score.
++- The legacy `m4_boundary.yaml` is boundary-only (`use_deep_supervision: false`), so prior manuscript labels must be checked.
++- The legacy `run_ablation.sh` evaluates test immediately and must not be used for validation-locked model selection.
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/README_VALIDATION_SELECTION_FACTORIAL.md /mnt/data/archive_review/README_VALIDATION_SELECTION_FACTORIAL.md
+--- /mnt/data/archive_original/README_VALIDATION_SELECTION_FACTORIAL.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/archive_review/README_VALIDATION_SELECTION_FACTORIAL.md	2026-08-03 10:02:22.623616140 +0000
+@@ -0,0 +1,367 @@
++# Validation-Locked Model Selection and Factorial Ablation
++
++Tài liệu này hướng dẫn quy trình mới để sửa hai vấn đề phương pháp luận:
++
++1. **Không chọn kiến trúc bằng test set.** Mọi checkpoint và kiến trúc được chọn bằng validation set theo quy tắc đã khai báo trước.
++2. **Tách riêng đóng góp của Skip-SE, boundary supervision và deep supervision.** Quy trình mới chạy thiết kế factorial đầy đủ trên ba yếu tố này, đồng thời giữ một cặp anchor Base → MultiScale để đo đóng góp ban đầu của MultiScale.
++
++## 1. Thiết kế thực nghiệm mới
++
++Có 9 kiến trúc duy nhất. Mỗi kiến trúc chạy với 3 seed huấn luyện `42, 43, 44`, tổng cộng 27 lần train.
++
++| ID | MultiScale | Skip-SE | Boundary | Deep supervision | Mục đích |
++|---|---:|---:|---:|---:|---|
++| `f0_base` | 0 | 0 | 0 | 0 | Anchor mô hình cơ sở |
++| `f1_m_only` | 1 | 0 | 0 | 0 | Main effect ban đầu của MultiScale |
++| `f2_m_s` | 1 | 1 | 0 | 0 | Skip-SE riêng |
++| `f3_m_b` | 1 | 0 | 1 | 0 | Boundary riêng |
++| `f4_m_d` | 1 | 0 | 0 | 1 | Deep supervision riêng |
++| `f5_m_s_b` | 1 | 1 | 1 | 0 | Interaction Skip-SE × Boundary |
++| `f6_m_s_d` | 1 | 1 | 0 | 1 | Interaction Skip-SE × Deep supervision |
++| `f7_m_b_d` | 1 | 0 | 1 | 1 | Interaction Boundary × Deep supervision |
++| `f8_full_m_s_b_d` | 1 | 1 | 1 | 1 | Mô hình Full |
++
++Thiết kế trên cho phép tách:
++
++- tác động của MultiScale: `f1_m_only - f0_base`;
++- main effect của Skip-SE, Boundary và Deep supervision;
++- các interaction hai chiều `S:B`, `S:D`, `B:D`;
++- interaction ba chiều `S:B:D`.
++
++## 2. Quy tắc chọn checkpoint đã khóa trước
++
++Mỗi lần train chỉ dùng validation set để chọn checkpoint. Quy tắc mặc định:
++
++1. Tối đa hóa validation Dice.
++2. Nếu Dice nằm trong khoảng tuyệt đối `0.001` so với checkpoint tốt hơn, ưu tiên:
++   - missing-prediction rate thấp hơn;
++   - HD95 thấp hơn;
++   - ASSD thấp hơn;
++   - Boundary-F1 cao hơn.
++3. Nếu vẫn hòa, giữ checkpoint xuất hiện sớm hơn để tránh thay đổi hậu nghiệm.
++
++Quy tắc nằm trong YAML tại:
++
++```yaml
++training:
++  split_seed: 42
++  validation_empty_surface_penalty: image_diagonal
++  checkpoint_selection:
++    primary:
++      metric: dice
++      mode: max
++      tolerance: 0.001
++    tie_breakers:
++      - metric: missing_prediction_rate
++        mode: min
++        tolerance: 0.0
++      - metric: hd95
++        mode: min
++        tolerance: 0.0
++      - metric: assd
++        mode: min
++        tolerance: 0.0
++      - metric: boundary_f1
++        mode: max
++        tolerance: 0.0
++```
++
++`split_seed=42` được giữ giống nhau cho tất cả kiến trúc và seed huấn luyện. Seed `42, 43, 44` chỉ thay đổi khởi tạo mô hình và ngẫu nhiên trong huấn luyện.
++
++## 3. Xử lý ca prediction rỗng trong validation
++
++HD95 và ASSD không xác định khi một mask rỗng còn mask kia không rỗng. Code mới không loại bỏ im lặng các ca này.
++
++Trong validation selection:
++
++- prediction rỗng trên ground truth có tổn thương được tính vào `missing_prediction_rate`;
++- HD95 và ASSD không hữu hạn được thay bằng đường chéo của ảnh đã resize;
++- với ảnh `256 × 256`, penalty là `sqrt(255² + 255²)` pixel;
++- quy tắc này được lưu trong checkpoint và `validation_best.json`.
++
++Điều này ngăn một checkpoint có nhiều complete misses nhưng HD95 hữu hạn thấp giả tạo được chọn.
++
++## 4. Chuẩn bị môi trường
++
++Từ thư mục gốc của project:
++
++```bash
++python -m venv .venv
++source .venv/bin/activate        # Linux/macOS
++# .venv\Scripts\activate       # Windows PowerShell
++
++pip install -r requirements.txt
++```
++
++Kiểm tra dữ liệu:
++
++```bash
++ls datasets/brisc2025/X_train.npy
++ls datasets/brisc2025/Y_train.npy
++ls datasets/brisc2025/X_test.npy
++ls datasets/brisc2025/Y_test.npy
++```
++
++## 5. Bước 1 — Sinh toàn bộ config factorial
++
++Các config đã được tạo sẵn trong `configs/factorial/`, nhưng có thể tái tạo bằng:
++
++```bash
++python scripts/create_factorial_ablation_configs.py \
++  --base-config configs/efficient_b0_boundary.yaml \
++  --output-root configs/factorial \
++  --runs-root outputs/factorial \
++  --seeds 42 43 44 \
++  --split-seed 42
++```
++
++Kết quả:
++
++```text
++configs/factorial/manifest.yaml
++configs/factorial/f0_base/seed_42.yaml
++...
++configs/factorial/f8_full_m_s_b_d/seed_44.yaml
++```
++
++## 6. Bước 2 — Train toàn bộ mô hình, chỉ dùng train/validation
++
++```bash
++python scripts/run_factorial_train_validation.py \
++  --manifest configs/factorial/manifest.yaml \
++  --device cuda
++```
++
++Script này **không gọi `evaluate.py` và không đọc test set**.
++
++Chạy lại sẽ tự bỏ qua các run đã có `validation_best.json`. Muốn train lại một run:
++
++```bash
++python scripts/run_factorial_train_validation.py \
++  --manifest configs/factorial/manifest.yaml \
++  --device cuda \
++  --variants f4_m_d \
++  --seeds 42 \
++  --force
++```
++
++Mỗi run tạo:
++
++```text
++outputs/factorial/<variant>/seed_<seed>/
++├── data_split.json
++├── train_log.csv
++├── checkpoint_selection.csv
++├── validation_best.json
++└── checkpoints/
++    ├── best_validation.pth
++    └── epoch_XXX.pth
++```
++
++### Ý nghĩa các file
++
++- `data_split.json`: danh sách train/validation index và SHA-256 của split.
++- `train_log.csv`: metric từng epoch.
++- `checkpoint_selection.csv`: epoch nào được chọn, lý do chọn hoặc không chọn.
++- `validation_best.json`: metric validation tốt nhất theo quy tắc đã khóa.
++- `best_validation.pth`: checkpoint được chọn hoàn toàn từ validation.
++
++## 7. Chạy song song trên nhiều GPU
++
++Ví dụ chia 9 biến thể trên 3 GPU:
++
++```bash
++CUDA_VISIBLE_DEVICES=0 python scripts/run_factorial_train_validation.py \
++  --device cuda --variants f0_base f1_m_only f2_m_s &
++
++CUDA_VISIBLE_DEVICES=1 python scripts/run_factorial_train_validation.py \
++  --device cuda --variants f3_m_b f4_m_d f5_m_s_b &
++
++CUDA_VISIBLE_DEVICES=2 python scripts/run_factorial_train_validation.py \
++  --device cuda --variants f6_m_s_d f7_m_b_d f8_full_m_s_b_d &
++
++wait
++```
++
++Không chạy hai process trên cùng một config/output directory.
++
++## 8. Bước 3 — Chọn kiến trúc bằng validation và khóa quyết định
++
++Sau khi đủ 27 run:
++
++```bash
++python scripts/select_architecture_from_validation.py \
++  --manifest configs/factorial/manifest.yaml \
++  --output-dir outputs/factorial/selection \
++  --dice-tolerance 0.001
++```
++
++Script sẽ:
++
++1. kiểm tra mọi run có checkpoint validation;
++2. xác minh mọi run dùng cùng validation split;
++3. tính mean ± SD validation qua ba seed cho từng kiến trúc;
++4. chọn kiến trúc theo quy tắc đã định;
++5. ghi SHA-256 của toàn bộ config và checkpoint;
++6. tạo file khóa trước khi test.
++
++Kết quả:
++
++```text
++outputs/factorial/selection/
++├── validation_per_run.csv
++├── validation_architecture_summary.csv
++└── SELECTION_LOCK.json
++```
++
++**Không chỉnh YAML, checkpoint hoặc selection rule sau khi tạo lock.** Nếu phải thay đổi, xóa toàn bộ kết quả test cũ, giải thích thay đổi, train/select lại từ đầu rồi mới test.
++
++## 9. Bước 4 — Đánh giá confirmatory chỉ kiến trúc đã chọn
++
++```bash
++python scripts/evaluate_factorial_after_lock.py \
++  --lock outputs/factorial/selection/SELECTION_LOCK.json \
++  --scope selected \
++  --device cuda
++```
++
++Script xác minh hash của config và checkpoint trước khi đọc test set.
++
++Kết quả của ba seed nằm tại:
++
++```text
++outputs/factorial/<selected_variant>/seed_42/eval/test_results.json
++outputs/factorial/<selected_variant>/seed_43/eval/test_results.json
++outputs/factorial/<selected_variant>/seed_44/eval/test_results.json
++```
++
++File audit:
++
++```text
++outputs/factorial/selection/TEST_EVALUATION_SELECTED.json
++```
++
++Đây là kết quả confirmatory chính để báo cáo cho mô hình cuối.
++
++## 10. Bước 5 — Đánh giá toàn bộ ablation sau khi đã khóa kiến trúc
++
++Chỉ thực hiện sau Bước 4 và sau khi lock đã tồn tại:
++
++```bash
++python scripts/evaluate_factorial_after_lock.py \
++  --lock outputs/factorial/selection/SELECTION_LOCK.json \
++  --scope all \
++  --device cuda
++```
++
++Các kết quả này được mô tả là:
++
++> Post-lock ablation test results; they were not used for architecture selection.
++
++Không dùng bảng test này để thay đổi selected architecture.
++
++## 11. Bước 6 — Tổng hợp bảng và factorial effects
++
++```bash
++python scripts/summarize_factorial_results.py \
++  --manifest configs/factorial/manifest.yaml \
++  --lock outputs/factorial/selection/SELECTION_LOCK.json \
++  --output-dir outputs/factorial/summary \
++  --require-all-test-results
++```
++
++Kết quả:
++
++```text
++outputs/factorial/summary/
++├── test_per_run.csv
++├── test_architecture_summary.csv
++├── factorial_effects.csv
++└── factorial_report.md
++```
++
++### File dùng để cập nhật paper
++
++- `test_architecture_summary.csv`: mean ± sample SD qua ba seed cho từng kiến trúc.
++- `factorial_effects.csv`: main effects và interaction, tính paired theo seed.
++- `factorial_report.md`: bảng đọc nhanh, có thể chuyển sang LaTeX.
++- `validation_architecture_summary.csv`: bằng chứng selected architecture được chọn bằng validation.
++- `SELECTION_LOCK.json`: audit trail cho reviewer.
++
++## 12. Cách đọc factorial effects
++
++Trong `factorial_effects.csv`:
++
++- `M`: MultiScale-only minus Base.
++- `S`: mean cell có Skip-SE minus mean cell không Skip-SE.
++- `B`: mean cell có Boundary minus mean cell không Boundary.
++- `D`: mean cell có Deep supervision minus mean cell không Deep supervision.
++- `S:B`, `S:D`, `B:D`: difference-of-differences.
++- `S:B:D`: interaction ba chiều.
++
++Dấu tốt:
++
++- Dice, IoU, BF1: delta dương tốt hơn.
++- HD95, ASSD: delta âm tốt hơn.
++
++Với chỉ ba seed, các effect này nên được báo cáo là **descriptive paired contrasts**, chưa nên gọi là kiểm định thống kê mạnh.
++
++## 13. Wording đề xuất cho Methods
++
++Có thể dùng đoạn sau:
++
++> All checkpoint and architecture decisions were made exclusively on a fixed validation partition shared by every factorial cell. Checkpoints were selected using a pre-specified lexicographic rule: validation Dice was maximized, and candidates within 0.001 absolute Dice were ranked by missing-prediction rate, HD95, ASSD, and Boundary-F1. The final architecture was locked from mean validation metrics across three training seeds before any test-set evaluation. Configuration and checkpoint hashes were stored in an immutable selection manifest. A base anchor and a complete 2×2×2 factorial over Skip-SE, boundary supervision, and deep supervision were evaluated with MultiScale enabled, allowing separate estimation of main effects and interactions.
++
++## 14. Wording đề xuất cho Results
++
++> The selected architecture was determined from validation data before test evaluation. Test-set ablations were computed only after the selection lock had been created and were not used to revise the architecture. Boundary-only, deep-supervision-only, combined, and Skip-SE interaction cells were evaluated independently, removing the confounding present when boundary and deep-supervision terms are introduced together.
++
++## 15. Những điều không được làm
++
++- Không chạy `scripts/run_ablation.sh` cũ để chọn mô hình; script cũ train rồi test ngay từng config.
++- Không xem `test_results.json` trước khi tạo `SELECTION_LOCK.json`.
++- Không đổi tolerance hoặc thứ tự tie-breaker sau khi đã xem test.
++- Không chọn seed tốt nhất để báo cáo; phải báo cáo mean ± SD qua tất cả seed đã khai báo.
++- Không gọi test ablation là confirmatory nếu bảng đó được xem trước khi khóa kiến trúc.
++- Không gộp Boundary và Deep supervision thành một thành phần trong phần diễn giải mới.
++
++## 16. Kiểm thử nhanh code
++
++Chạy unit test cho selection policy:
++
++```bash
++python -m unittest tests/test_validation_selection.py -v
++```
++
++Kiểm tra syntax toàn bộ file mới:
++
++```bash
++python -m py_compile \
++  train.py evaluate.py \
++  utils/selection.py \
++  scripts/create_factorial_ablation_configs.py \
++  scripts/run_factorial_train_validation.py \
++  scripts/select_architecture_from_validation.py \
++  scripts/evaluate_factorial_after_lock.py \
++  scripts/summarize_factorial_results.py
++```
++
++## 17. Lưu ý còn lại
++
++Các sửa đổi này giải quyết trực tiếp:
++
++- chọn checkpoint/kiến trúc bằng validation thay vì test;
++- cùng một validation split cho mọi run;
++- audit trail chống chỉnh config/checkpoint sau lựa chọn;
++- tách Boundary và Deep supervision;
++- đo interaction giữa Skip-SE, Boundary và Deep supervision.
++
++Chúng chưa tự động giải quyết patient-level independence, external validation, physical-spacing metrics hoặc paired case-level significance testing. Các vấn đề đó cần dữ liệu hoặc thực nghiệm bổ sung riêng.
++
++## 18. Các phát hiện thêm khi audit code gốc
++
++Ba điểm cần đồng bộ lại trong paper:
++
++1. `NPYSliceDataset._normalize()` đang tính mean và standard deviation **riêng trên từng ảnh/lát cắt**, không phải dataset-level z-score. Phần Methods nên ghi `per-slice z-score normalization` trừ khi bạn thay preprocessing.
++2. Config cũ `configs/ablations/m4_boundary.yaml` thực tế bật boundary head nhưng tắt deep supervision. Nếu bảng paper trước đây gọi hàng này là `Boundary + Deep Supervision`, tên hàng đó không khớp code. Thiết kế factorial mới tách rõ Boundary-only, DS-only và Boundary+DS.
++3. `scripts/run_ablation.sh` cũ train xong rồi chạy test cho từng kiến trúc ngay lập tức. Không dùng script này cho bản paper sửa đổi vì nó không tạo bước khóa kiến trúc trước test.
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/configs/efficient_b0_boundary.yaml /mnt/data/archive_review/configs/efficient_b0_boundary.yaml
+--- /mnt/data/archive_original/configs/efficient_b0_boundary.yaml	2026-06-30 09:16:42.000000000 +0000
++++ /mnt/data/archive_review/configs/efficient_b0_boundary.yaml	2026-08-03 09:55:08.231631359 +0000
+@@ -1,26 +1,28 @@
+ project_name: BE_UNet_EfficientB0_Boundary
+ seed: 42
+-
+ paths:
+   x_train: datasets/brisc2025/X_train.npy
+   y_train: datasets/brisc2025/Y_train.npy
+   x_test: datasets/brisc2025/X_test.npy
+   y_test: datasets/brisc2025/Y_test.npy
+   output_dir: outputs
+-
+ model:
+   name: efficientnet_b0_unet_boundary
+   encoder_name: efficientnet_b0
+   pretrained: true
+   in_channels: 1
+   num_classes: 1
+-  decoder_channels: [256, 160, 96, 64, 32]
++  decoder_channels:
++  - 256
++  - 160
++  - 96
++  - 64
++  - 32
+   ms_channels: 24
+   use_multiscale: true
+   use_se: false
+   use_boundary_head: true
+   use_deep_supervision: true
+-
+ training:
+   image_size: 256
+   batch_size: 8
+@@ -32,12 +34,32 @@
+   amp: true
+   threshold: 0.5
+   save_every: 10
+-
++  split_seed: 42
++  deterministic: true
++  checkpoint_selection:
++    primary:
++      metric: dice
++      mode: max
++      tolerance: 0.001
++    tie_breakers:
++    - metric: missing_prediction_rate
++      mode: min
++      tolerance: 0.0
++    - metric: hd95
++      mode: min
++      tolerance: 0.0
++    - metric: assd
++      mode: min
++      tolerance: 0.0
++    - metric: boundary_f1
++      mode: max
++      tolerance: 0.0
++    min_epoch: 1
++  validation_empty_surface_penalty: image_diagonal
+ loss:
+   lambda_boundary: 0.15
+   beta_deep_supervision: 0.25
+   boundary_kernel_size: 3
+-
+ augmentation:
+   horizontal_flip: true
+   vertical_flip: false
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/evaluate.py /mnt/data/archive_review/evaluate.py
+--- /mnt/data/archive_original/evaluate.py	2026-07-30 01:57:21.000000000 +0000
++++ /mnt/data/archive_review/evaluate.py	2026-08-03 09:56:27.251628590 +0000
+@@ -1,5 +1,7 @@
+ import argparse
+ import csv
++import hashlib
++import json
+ from pathlib import Path
+ 
+ import torch
+@@ -30,6 +32,44 @@
+ ]
+ 
+ 
++def _sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as handle:
++        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def verify_selection_lock(config_path: Path, checkpoint_path: Path, lock_path: Path) -> dict:
++    """Verify that a factorial test evaluation occurs only after validation lock."""
++    if not lock_path.exists():
++        raise FileNotFoundError(
++            f"Required validation selection lock not found: {lock_path}. "
++            "Do not evaluate the test set before architecture selection is frozen."
++        )
++    lock = json.loads(lock_path.read_text(encoding="utf-8"))
++    config_resolved = config_path.resolve()
++    checkpoint_resolved = checkpoint_path.resolve()
++    matching = []
++    for record in lock.get("all_locked_files", []):
++        if (
++            Path(record["config"]).resolve() == config_resolved
++            and Path(record["checkpoint"]).resolve() == checkpoint_resolved
++        ):
++            matching.append(record)
++    if len(matching) != 1:
++        raise RuntimeError(
++            "Config/checkpoint pair is not present exactly once in the selection lock: "
++            f"{config_path}, {checkpoint_path}"
++        )
++    record = matching[0]
++    if _sha256_file(config_path) != record["config_sha256"]:
++        raise RuntimeError(f"Config changed after architecture lock: {config_path}")
++    if _sha256_file(checkpoint_path) != record["checkpoint_sha256"]:
++        raise RuntimeError(f"Checkpoint changed after architecture lock: {checkpoint_path}")
++    return lock
++
++
+ def save_per_case_csv(rows, output_path: Path) -> None:
+     output_path.parent.mkdir(parents=True, exist_ok=True)
+     fieldnames = ["case_index", *METRIC_NAMES]
+@@ -71,6 +111,11 @@
+     cfg = load_config(args.config)
+     device = torch.device(args.device)
+     paths = cfg["paths"]
++    lock_info = None
++    eval_cfg = cfg.get("evaluation", {})
++    if args.split == "test" and bool(eval_cfg.get("require_selection_lock_for_test", False)):
++        lock_path = Path(eval_cfg.get("selection_lock", "outputs/factorial/selection/SELECTION_LOCK.json"))
++        lock_info = verify_selection_lock(Path(args.config), Path(args.checkpoint), lock_path)
+     tcfg = cfg["training"]
+     mcfg = cfg["model"]
+ 
+@@ -195,6 +240,22 @@
+     results.update({f"post_{key}": value for key, value in post_stats.items()})
+     results["checkpoint_epoch"] = ckpt.get("epoch")
+     results["checkpoint_best_dice"] = ckpt.get("best_dice")
++    results["checkpoint_best_validation_metrics"] = ckpt.get("best_validation_metrics")
++    results["checkpoint_selection_policy"] = ckpt.get("checkpoint_selection_policy")
++    results["checkpoint_selection_reason"] = ckpt.get("selection_reason")
++    results["validation_metric_policy"] = ckpt.get("validation_metric_policy")
++    results["split_sha256"] = ckpt.get("split_sha256")
++    results["checkpoint_selection_source"] = "validation only"
++    if lock_info is not None:
++        results["selection_lock_verified"] = True
++        results["selection_lock_selected_variant"] = lock_info.get("selected_variant")
++        results["test_interpretation"] = (
++            "confirmatory selected-model evaluation"
++            if cfg.get("experiment", {}).get("variant") == lock_info.get("selected_variant")
++            else "post-lock ablation evaluation; not used for architecture selection"
++        )
++    else:
++        results["selection_lock_verified"] = False
+ 
+     out_dir = Path(paths.get("output_dir", "outputs")) / "eval"
+     out_dir.mkdir(parents=True, exist_ok=True)
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/scripts/create_factorial_ablation_configs.py /mnt/data/archive_review/scripts/create_factorial_ablation_configs.py
+--- /mnt/data/archive_original/scripts/create_factorial_ablation_configs.py	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/archive_review/scripts/create_factorial_ablation_configs.py	2026-08-03 09:56:38.323628202 +0000
+@@ -0,0 +1,157 @@
++#!/usr/bin/env python3
++"""Generate reviewer-grade factorial ablation configurations.
++
++The design contains one base anchor and a complete 2x2x2 factorial over
++Skip-SE (S), boundary supervision (B), and deep supervision (D), with
++MultiScale fixed ON in the factorial cells.  This yields:
++
++- one Base anchor (M=0,S=0,B=0,D=0), and
++- eight MultiScale cells (M=1, S/B/D each in {0,1}).
++
++All runs share the same validation split seed.  Training seeds alter only model
++initialisation and stochastic training, so cell comparisons are paired by seed.
++"""
++
++from __future__ import annotations
++
++import argparse
++import copy
++from pathlib import Path
++from typing import Dict, Iterable, List
++
++import yaml
++
++
++FACTORIAL_CELLS = [
++    # name, M, S, B, D
++    ("f0_base", False, False, False, False),
++    ("f1_m_only", True, False, False, False),
++    ("f2_m_s", True, True, False, False),
++    ("f3_m_b", True, False, True, False),
++    ("f4_m_d", True, False, False, True),
++    ("f5_m_s_b", True, True, True, False),
++    ("f6_m_s_d", True, True, False, True),
++    ("f7_m_b_d", True, False, True, True),
++    ("f8_full_m_s_b_d", True, True, True, True),
++]
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--base-config", default="configs/efficient_b0_boundary.yaml")
++    parser.add_argument("--output-root", default="configs/factorial")
++    parser.add_argument("--runs-root", default="outputs/factorial")
++    parser.add_argument("--seeds", nargs="+", type=int, default=[42, 43, 44])
++    parser.add_argument("--split-seed", type=int, default=42)
++    parser.add_argument("--boundary-weight", type=float, default=0.15)
++    parser.add_argument("--deep-supervision-weight", type=float, default=0.25)
++    parser.add_argument(
++        "--non-deterministic",
++        action="store_true",
++        help="Disable deterministic algorithms. The default is deterministic=True.",
++    )
++    return parser.parse_args()
++
++
++def write_yaml(config: Dict, path: Path) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    with path.open("w", encoding="utf-8") as handle:
++        yaml.safe_dump(config, handle, sort_keys=False, allow_unicode=True)
++
++
++def main() -> None:
++    args = parse_args()
++    base_path = Path(args.base_config)
++    with base_path.open("r", encoding="utf-8") as handle:
++        base = yaml.safe_load(handle)
++
++    output_root = Path(args.output_root)
++    manifest: List[Dict] = []
++
++    for variant, use_m, use_s, use_b, use_d in FACTORIAL_CELLS:
++        for seed in args.seeds:
++            cfg = copy.deepcopy(base)
++            cfg["seed"] = int(seed)
++            cfg.setdefault("experiment", {})
++            cfg["experiment"].update(
++                {
++                    "family": "validation_locked_factorial_ablation",
++                    "variant": variant,
++                    "factors": {
++                        "multiscale": int(use_m),
++                        "skip_se": int(use_s),
++                        "boundary": int(use_b),
++                        "deep_supervision": int(use_d),
++                    },
++                    "training_seed": int(seed),
++                    "split_seed": int(args.split_seed),
++                }
++            )
++
++            model = cfg.setdefault("model", {})
++            model["use_multiscale"] = bool(use_m)
++            model["use_se"] = bool(use_s)
++            model["use_boundary_head"] = bool(use_b)
++            model["use_deep_supervision"] = bool(use_d)
++
++            loss = cfg.setdefault("loss", {})
++            loss["lambda_boundary"] = float(args.boundary_weight) if use_b else 0.0
++            loss["beta_deep_supervision"] = (
++                float(args.deep_supervision_weight) if use_d else 0.0
++            )
++
++            training = cfg.setdefault("training", {})
++            training["split_seed"] = int(args.split_seed)
++            training["deterministic"] = not args.non_deterministic
++            training.setdefault(
++                "checkpoint_selection",
++                {
++                    "primary": {"metric": "dice", "mode": "max", "tolerance": 0.001},
++                    "tie_breakers": [
++                        {"metric": "missing_prediction_rate", "mode": "min", "tolerance": 0.0},
++                        {"metric": "hd95", "mode": "min", "tolerance": 0.0},
++                        {"metric": "assd", "mode": "min", "tolerance": 0.0},
++                        {"metric": "boundary_f1", "mode": "max", "tolerance": 0.0},
++                    ],
++                    "min_epoch": 1,
++                },
++            )
++
++            run_dir = Path(args.runs_root) / variant / f"seed_{seed}"
++            cfg.setdefault("paths", {})["output_dir"] = str(run_dir)
++            cfg.setdefault("evaluation", {})
++            cfg["evaluation"].update(
++                {
++                    "require_selection_lock_for_test": True,
++                    "selection_lock": str(Path(args.runs_root) / "selection" / "SELECTION_LOCK.json"),
++                }
++            )
++            config_path = output_root / variant / f"seed_{seed}.yaml"
++            write_yaml(cfg, config_path)
++            manifest.append(
++                {
++                    "variant": variant,
++                    "seed": int(seed),
++                    "config": str(config_path),
++                    "output_dir": str(run_dir),
++                    **cfg["experiment"]["factors"],
++                }
++            )
++            print(config_path)
++
++    manifest_path = output_root / "manifest.yaml"
++    write_yaml(
++        {
++            "base_config": str(base_path),
++            "split_seed": int(args.split_seed),
++            "seeds": [int(seed) for seed in args.seeds],
++            "design": "Base anchor plus complete 2x2x2 factorial over S/B/D with M=1",
++            "runs": manifest,
++        },
++        manifest_path,
++    )
++    print(f"Saved manifest: {manifest_path}")
++
++
++if __name__ == "__main__":
++    main()
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/scripts/evaluate_factorial_after_lock.py /mnt/data/archive_review/scripts/evaluate_factorial_after_lock.py
+--- /mnt/data/archive_original/scripts/evaluate_factorial_after_lock.py	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/archive_review/scripts/evaluate_factorial_after_lock.py	2026-08-03 09:50:18.195641520 +0000
+@@ -0,0 +1,126 @@
++#!/usr/bin/env python3
++"""Evaluate locked factorial checkpoints on the untouched test set.
++
++The script verifies SHA-256 hashes from SELECTION_LOCK.json.  It refuses to
++run if any configuration/checkpoint changed after validation-only selection.
++Use --scope selected for the confirmatory final model.  Use --scope all only
++after the architecture has been locked, to produce a transparently labelled
++post-lock ablation table.
++"""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import subprocess
++import sys
++from pathlib import Path
++from typing import Dict, List
++
++
++def sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as handle:
++        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--lock", default="outputs/factorial/selection/SELECTION_LOCK.json")
++    parser.add_argument("--scope", choices=["selected", "all"], default="selected")
++    parser.add_argument("--device", default="cuda")
++    parser.add_argument("--force", action="store_true")
++    parser.add_argument("--dry-run", action="store_true")
++    return parser.parse_args()
++
++
++def verify_lock(lock: Dict) -> None:
++    for record in lock["all_locked_files"]:
++        config = Path(record["config"])
++        checkpoint = Path(record["checkpoint"])
++        if not config.exists() or not checkpoint.exists():
++            raise FileNotFoundError(f"Locked file missing: {config} or {checkpoint}")
++        if sha256_file(config) != record["config_sha256"]:
++            raise RuntimeError(f"Config changed after selection lock: {config}")
++        if sha256_file(checkpoint) != record["checkpoint_sha256"]:
++            raise RuntimeError(f"Checkpoint changed after selection lock: {checkpoint}")
++
++
++def main() -> None:
++    args = parse_args()
++    lock_path = Path(args.lock)
++    if not lock_path.exists():
++        raise FileNotFoundError(
++            f"Selection lock not found: {lock_path}. "
++            "Run validation training and architecture selection first."
++        )
++    lock = json.loads(lock_path.read_text(encoding="utf-8"))
++    verify_lock(lock)
++
++    records: List[Dict] = lock["all_locked_files"]
++    if args.scope == "selected":
++        selected = lock["selected_variant"]
++        records = [record for record in records if record["variant"] == selected]
++
++    for index, record in enumerate(records, start=1):
++        config_path = Path(record["config"])
++        checkpoint_path = Path(record["checkpoint"])
++        # Read output_dir without importing project code in this orchestration script.
++        import yaml
++        with config_path.open("r", encoding="utf-8") as handle:
++            cfg = yaml.safe_load(handle)
++        result_path = Path(cfg["paths"]["output_dir"]) / "eval" / "test_results.json"
++        label = f"{record['variant']} seed={record['seed']}"
++        if result_path.exists() and not args.force:
++            print(f"[{index}/{len(records)}] SKIP {label}: {result_path} exists")
++            continue
++
++        command = [
++            sys.executable,
++            "evaluate.py",
++            "--config",
++            str(config_path),
++            "--checkpoint",
++            str(checkpoint_path),
++            "--device",
++            args.device,
++            "--split",
++            "test",
++        ]
++        print(f"[{index}/{len(records)}] TEST {label}")
++        print(" ".join(command))
++        if not args.dry_run:
++            subprocess.run(command, check=True)
++            if not result_path.exists():
++                raise RuntimeError(f"Evaluation finished but result is missing: {result_path}")
++
++    audit_path = lock_path.parent / f"TEST_EVALUATION_{args.scope.upper()}.json"
++    if not args.dry_run:
++        audit_path.write_text(
++            json.dumps(
++                {
++                    "selection_lock": str(lock_path),
++                    "scope": args.scope,
++                    "selected_variant": lock["selected_variant"],
++                    "evaluated_runs": [
++                        {"variant": record["variant"], "seed": record["seed"]}
++                        for record in records
++                    ],
++                    "interpretation": (
++                        "confirmatory selected-model test evaluation"
++                        if args.scope == "selected"
++                        else "post-lock ablation test evaluation; not used for architecture selection"
++                    ),
++                },
++                indent=2,
++            ),
++            encoding="utf-8",
++        )
++        print(f"Audit record: {audit_path}")
++
++
++if __name__ == "__main__":
++    main()
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/scripts/run_factorial_train_validation.py /mnt/data/archive_review/scripts/run_factorial_train_validation.py
+--- /mnt/data/archive_original/scripts/run_factorial_train_validation.py	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/archive_review/scripts/run_factorial_train_validation.py	2026-08-03 09:50:18.195641520 +0000
+@@ -0,0 +1,69 @@
++#!/usr/bin/env python3
++"""Train factorial cells and create validation-selected checkpoints only.
++
++This phase never invokes evaluate.py and never reads X_test/Y_test.  It is safe
++to resume: runs with validation_best.json are skipped unless --force is used.
++"""
++
++from __future__ import annotations
++
++import argparse
++import subprocess
++import sys
++from pathlib import Path
++
++import yaml
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--manifest", default="configs/factorial/manifest.yaml")
++    parser.add_argument("--device", default="cuda")
++    parser.add_argument("--variants", nargs="*", default=None)
++    parser.add_argument("--seeds", nargs="*", type=int, default=None)
++    parser.add_argument("--force", action="store_true")
++    parser.add_argument("--dry-run", action="store_true")
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++    with Path(args.manifest).open("r", encoding="utf-8") as handle:
++        manifest = yaml.safe_load(handle)
++
++    selected_variants = set(args.variants or [])
++    selected_seeds = set(args.seeds or [])
++    runs = []
++    for run in manifest["runs"]:
++        if selected_variants and run["variant"] not in selected_variants:
++            continue
++        if selected_seeds and int(run["seed"]) not in selected_seeds:
++            continue
++        runs.append(run)
++
++    if not runs:
++        raise RuntimeError("No runs matched the requested variants/seeds.")
++
++    for index, run in enumerate(runs, start=1):
++        config = Path(run["config"])
++        output_dir = Path(run["output_dir"])
++        done_marker = output_dir / "validation_best.json"
++        label = f"{run['variant']} seed={run['seed']}"
++        if done_marker.exists() and not args.force:
++            print(f"[{index}/{len(runs)}] SKIP {label}: {done_marker} exists")
++            continue
++
++        command = [sys.executable, "train.py", "--config", str(config), "--device", args.device]
++        print(f"[{index}/{len(runs)}] TRAIN {label}")
++        print(" ".join(command))
++        if not args.dry_run:
++            subprocess.run(command, check=True)
++            if not done_marker.exists():
++                raise RuntimeError(f"Training finished but marker is missing: {done_marker}")
++
++    print("Validation-only training phase complete.")
++    print("Next: python scripts/select_architecture_from_validation.py")
++
++
++if __name__ == "__main__":
++    main()
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/scripts/select_architecture_from_validation.py /mnt/data/archive_review/scripts/select_architecture_from_validation.py
+--- /mnt/data/archive_original/scripts/select_architecture_from_validation.py	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/archive_review/scripts/select_architecture_from_validation.py	2026-08-03 09:55:08.235631359 +0000
+@@ -0,0 +1,219 @@
++#!/usr/bin/env python3
++"""Select and lock the architecture using validation data only.
++
++This script MUST be run before any factorial test-set evaluation.  It reads the
++best validation record from every seed, averages metrics by architecture, and
++applies the pre-specified rule:
++
++1. keep variants within ``dice_tolerance`` of the best mean validation Dice;
++2. choose the lowest mean validation HD95;
++3. then the lowest ASSD;
++4. then the highest Boundary-F1;
++5. then the lexicographically first variant name.
++
++It writes a cryptographic lock containing config/checkpoint hashes.  The test
++evaluation script refuses to proceed without this lock or if files changed.
++"""
++
++from __future__ import annotations
++
++import argparse
++import csv
++import hashlib
++import json
++import math
++from pathlib import Path
++from statistics import mean, stdev
++from typing import Any, Dict, Iterable, List
++
++import yaml
++
++
++METRICS = ["dice", "iou", "missing_prediction_rate", "hd95", "assd", "boundary_f1", "loss"]
++
++
++def sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as handle:
++        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def sample_std(values: List[float]) -> float:
++    return float(stdev(values)) if len(values) > 1 else 0.0
++
++
++def write_csv(rows: List[Dict[str, Any]], path: Path) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    fields = list(rows[0].keys())
++    with path.open("w", newline="", encoding="utf-8") as handle:
++        writer = csv.DictWriter(handle, fieldnames=fields)
++        writer.writeheader()
++        writer.writerows(rows)
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--manifest", default="configs/factorial/manifest.yaml")
++    parser.add_argument("--output-dir", default="outputs/factorial/selection")
++    parser.add_argument("--dice-tolerance", type=float, default=0.001)
++    parser.add_argument("--overwrite", action="store_true")
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++    manifest_path = Path(args.manifest)
++    output_dir = Path(args.output_dir)
++    lock_path = output_dir / "SELECTION_LOCK.json"
++    if lock_path.exists() and not args.overwrite:
++        raise FileExistsError(
++            f"Selection lock already exists: {lock_path}. "
++            "Use --overwrite only before any test-set evaluation."
++        )
++
++    with manifest_path.open("r", encoding="utf-8") as handle:
++        manifest = yaml.safe_load(handle)
++
++    per_run: List[Dict[str, Any]] = []
++    split_hashes = set()
++    for run in manifest["runs"]:
++        config_path = Path(run["config"])
++        output_dir_run = Path(run["output_dir"])
++        validation_path = output_dir_run / "validation_best.json"
++        checkpoint_path = output_dir_run / "checkpoints" / "best_validation.pth"
++        split_path = output_dir_run / "data_split.json"
++        missing = [
++            str(path)
++            for path in (config_path, validation_path, checkpoint_path, split_path)
++            if not path.exists()
++        ]
++        if missing:
++            raise FileNotFoundError(
++                "All validation runs must finish before architecture selection. Missing:\n"
++                + "\n".join(missing)
++            )
++
++        validation = json.loads(validation_path.read_text(encoding="utf-8"))
++        split_info = json.loads(split_path.read_text(encoding="utf-8"))
++        split_hash = split_info["split_sha256"]
++        split_hashes.add(split_hash)
++        metrics = validation["best_validation_metrics"]
++        row: Dict[str, Any] = {
++            "variant": run["variant"],
++            "seed": int(run["seed"]),
++            "best_epoch": int(validation["best_epoch"]),
++            "split_sha256": split_hash,
++            "config": str(config_path),
++            "checkpoint": str(checkpoint_path),
++        }
++        for factor in ("multiscale", "skip_se", "boundary", "deep_supervision"):
++            row[factor] = int(run[factor])
++        for metric in METRICS:
++            row[metric] = float(metrics[metric])
++        per_run.append(row)
++
++    if len(split_hashes) != 1:
++        raise RuntimeError(
++            "Factorial runs do not share one validation split. "
++            f"Observed split hashes: {sorted(split_hashes)}"
++        )
++
++    variants = sorted({row["variant"] for row in per_run})
++    summary_rows: List[Dict[str, Any]] = []
++    for variant in variants:
++        rows = [row for row in per_run if row["variant"] == variant]
++        seeds = sorted(row["seed"] for row in rows)
++        summary: Dict[str, Any] = {
++            "variant": variant,
++            "n_seeds": len(rows),
++            "seeds": ",".join(map(str, seeds)),
++            "multiscale": rows[0]["multiscale"],
++            "skip_se": rows[0]["skip_se"],
++            "boundary": rows[0]["boundary"],
++            "deep_supervision": rows[0]["deep_supervision"],
++            "mean_best_epoch": mean(row["best_epoch"] for row in rows),
++        }
++        for metric in METRICS:
++            values = [float(row[metric]) for row in rows]
++            summary[f"{metric}_mean"] = mean(values)
++            summary[f"{metric}_std"] = sample_std(values)
++        summary_rows.append(summary)
++
++    best_dice = max(row["dice_mean"] for row in summary_rows)
++    candidates = [
++        row
++        for row in summary_rows
++        if row["dice_mean"] >= best_dice - float(args.dice_tolerance)
++    ]
++    candidates.sort(
++        key=lambda row: (
++            row["missing_prediction_rate_mean"],
++            row["hd95_mean"] if math.isfinite(row["hd95_mean"]) else float("inf"),
++            row["assd_mean"] if math.isfinite(row["assd_mean"]) else float("inf"),
++            -row["boundary_f1_mean"],
++            row["variant"],
++        )
++    )
++    selected = candidates[0]
++
++    output_dir.mkdir(parents=True, exist_ok=True)
++    write_csv(per_run, output_dir / "validation_per_run.csv")
++    write_csv(summary_rows, output_dir / "validation_architecture_summary.csv")
++
++    selected_runs = [row for row in per_run if row["variant"] == selected["variant"]]
++    file_records = []
++    for row in per_run:
++        config_path = Path(row["config"])
++        checkpoint_path = Path(row["checkpoint"])
++        file_records.append(
++            {
++                "variant": row["variant"],
++                "seed": row["seed"],
++                "config": str(config_path),
++                "config_sha256": sha256_file(config_path),
++                "checkpoint": str(checkpoint_path),
++                "checkpoint_sha256": sha256_file(checkpoint_path),
++                "split_sha256": row["split_sha256"],
++            }
++        )
++
++    lock = {
++        "status": "architecture_locked_before_test_evaluation",
++        "selection_basis": "validation only; no test metrics were read",
++        "manifest": str(manifest_path),
++        "manifest_sha256": sha256_file(manifest_path),
++        "validation_split_sha256": next(iter(split_hashes)),
++        "policy": {
++            "primary": "maximum mean validation Dice across seeds",
++            "dice_tolerance": float(args.dice_tolerance),
++            "candidate_rule": "within tolerance of best mean validation Dice",
++            "tie_breakers": [
++                "minimum mean validation missing-prediction rate",
++                "minimum mean validation HD95",
++                "minimum mean validation ASSD",
++                "maximum mean validation Boundary-F1",
++                "lexicographic variant name",
++            ],
++        },
++        "selected_variant": selected["variant"],
++        "selected_validation_summary": selected,
++        "selected_runs": selected_runs,
++        "all_locked_files": file_records,
++    }
++    lock_path.write_text(json.dumps(lock, indent=2, ensure_ascii=False), encoding="utf-8")
++
++    print(f"Selected architecture: {selected['variant']}")
++    print(
++        f"Validation Dice={selected['dice_mean']:.6f}, "
++        f"missing-rate={selected['missing_prediction_rate_mean']:.6f}, "
++        f"HD95={selected['hd95_mean']:.6f}, "
++        f"ASSD={selected['assd_mean']:.6f}, "
++        f"BF1={selected['boundary_f1_mean']:.6f}"
++    )
++    print(f"Selection lock: {lock_path}")
++
++
++if __name__ == "__main__":
++    main()
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/scripts/summarize_factorial_results.py /mnt/data/archive_review/scripts/summarize_factorial_results.py
+--- /mnt/data/archive_original/scripts/summarize_factorial_results.py	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/archive_review/scripts/summarize_factorial_results.py	2026-08-03 09:51:27.483639093 +0000
+@@ -0,0 +1,292 @@
++#!/usr/bin/env python3
++"""Summarize validation-locked factorial experiments.
++
++Outputs
++-------
++- validation_per_run.csv / validation_architecture_summary.csv (copied from selection)
++- test_per_run.csv
++- test_architecture_summary.csv (mean ± sample SD across training seeds)
++- factorial_effects.csv (paired-by-seed main effects and interactions)
++- factorial_report.md (paper-ready tables and interpretation notes)
++
++Test results are never used for selecting the architecture; the script requires
++SELECTION_LOCK.json and labels the full table as post-lock ablation evidence.
++"""
++
++from __future__ import annotations
++
++import argparse
++import csv
++import json
++from pathlib import Path
++from statistics import mean, stdev
++from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
++
++import yaml
++
++
++METRICS = ["dice", "iou", "hd95", "assd", "boundary_f1", "params", "gflops"]
++ACCURACY_METRICS = ["dice", "iou", "hd95", "assd", "boundary_f1"]
++FACTOR_NAMES = ["skip_se", "boundary", "deep_supervision"]
++
++
++def sample_std(values: Sequence[float]) -> float:
++    return float(stdev(values)) if len(values) > 1 else 0.0
++
++
++def write_csv(rows: List[Dict[str, Any]], path: Path) -> None:
++    if not rows:
++        return
++    path.parent.mkdir(parents=True, exist_ok=True)
++    fields: List[str] = []
++    for row in rows:
++        for field in row:
++            if field not in fields:
++                fields.append(field)
++    with path.open("w", newline="", encoding="utf-8") as handle:
++        writer = csv.DictWriter(handle, fieldnames=fields)
++        writer.writeheader()
++        writer.writerows(rows)
++
++
++def fmt(value: float, digits: int = 4) -> str:
++    return f"{value:.{digits}f}"
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--manifest", default="configs/factorial/manifest.yaml")
++    parser.add_argument("--lock", default="outputs/factorial/selection/SELECTION_LOCK.json")
++    parser.add_argument("--output-dir", default="outputs/factorial/summary")
++    parser.add_argument(
++        "--require-all-test-results",
++        action="store_true",
++        help="Fail unless every factorial run has test_results.json.",
++    )
++    return parser.parse_args()
++
++
++def variant_summary(per_run: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
++    summaries: List[Dict[str, Any]] = []
++    for variant in sorted({row["variant"] for row in per_run}):
++        rows = [row for row in per_run if row["variant"] == variant]
++        summary: Dict[str, Any] = {
++            "variant": variant,
++            "n_seeds": len(rows),
++            "seeds": ",".join(str(v) for v in sorted(row["seed"] for row in rows)),
++            "multiscale": rows[0]["multiscale"],
++            "skip_se": rows[0]["skip_se"],
++            "boundary": rows[0]["boundary"],
++            "deep_supervision": rows[0]["deep_supervision"],
++        }
++        for metric in METRICS:
++            values = [float(row[metric]) for row in rows if row.get(metric) is not None]
++            if values:
++                summary[f"{metric}_mean"] = mean(values)
++                summary[f"{metric}_std"] = sample_std(values)
++        summaries.append(summary)
++    return summaries
++
++
++def cell_map(per_run: List[Dict[str, Any]]) -> Dict[Tuple[int, int, int, int], Dict[str, Any]]:
++    return {
++        (
++            int(row["seed"]),
++            int(row["skip_se"]),
++            int(row["boundary"]),
++            int(row["deep_supervision"]),
++        ): row
++        for row in per_run
++        if int(row["multiscale"]) == 1
++    }
++
++
++def paired_factorial_effects(per_run: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
++    cells = cell_map(per_run)
++    seeds = sorted({int(row["seed"]) for row in per_run})
++    effects: List[Dict[str, Any]] = []
++
++    # Ensure the complete 2x2x2 design exists for every included seed.
++    complete_seeds = []
++    for seed in seeds:
++        required = [(seed, s, b, d) for s in (0, 1) for b in (0, 1) for d in (0, 1)]
++        if all(key in cells for key in required):
++            complete_seeds.append(seed)
++
++    for metric in ACCURACY_METRICS:
++        per_effect: Dict[str, List[float]] = {
++            "M": [],
++            "S": [],
++            "B": [],
++            "D": [],
++            "S:B": [],
++            "S:D": [],
++            "B:D": [],
++            "S:B:D": [],
++        }
++
++        # MultiScale anchor effect: M-only minus Base for the same seed.
++        by_variant_seed = {(row["variant"], int(row["seed"])): row for row in per_run}
++        for seed in seeds:
++            base = by_variant_seed.get(("f0_base", seed))
++            m_only = by_variant_seed.get(("f1_m_only", seed))
++            if base is not None and m_only is not None:
++                per_effect["M"].append(float(m_only[metric]) - float(base[metric]))
++
++        for seed in complete_seeds:
++            y = lambda s, b, d: float(cells[(seed, s, b, d)][metric])
++            per_effect["S"].append(
++                mean(y(1, b, d) for b in (0, 1) for d in (0, 1))
++                - mean(y(0, b, d) for b in (0, 1) for d in (0, 1))
++            )
++            per_effect["B"].append(
++                mean(y(s, 1, d) for s in (0, 1) for d in (0, 1))
++                - mean(y(s, 0, d) for s in (0, 1) for d in (0, 1))
++            )
++            per_effect["D"].append(
++                mean(y(s, b, 1) for s in (0, 1) for b in (0, 1))
++                - mean(y(s, b, 0) for s in (0, 1) for b in (0, 1))
++            )
++            per_effect["S:B"].append(
++                mean(y(1, 1, d) - y(1, 0, d) - y(0, 1, d) + y(0, 0, d) for d in (0, 1))
++            )
++            per_effect["S:D"].append(
++                mean(y(1, b, 1) - y(1, b, 0) - y(0, b, 1) + y(0, b, 0) for b in (0, 1))
++            )
++            per_effect["B:D"].append(
++                mean(y(s, 1, 1) - y(s, 1, 0) - y(s, 0, 1) + y(s, 0, 0) for s in (0, 1))
++            )
++            per_effect["S:B:D"].append(
++                y(1, 1, 1)
++                - y(1, 1, 0)
++                - y(1, 0, 1)
++                - y(0, 1, 1)
++                + y(1, 0, 0)
++                + y(0, 1, 0)
++                + y(0, 0, 1)
++                - y(0, 0, 0)
++            )
++
++        for effect_name, values in per_effect.items():
++            if not values:
++                continue
++            mean_delta = mean(values)
++            better_when = "positive" if metric in {"dice", "iou", "boundary_f1"} else "negative"
++            effects.append(
++                {
++                    "metric": metric,
++                    "effect": effect_name,
++                    "n_paired_seeds": len(values),
++                    "mean_raw_delta": mean_delta,
++                    "std_raw_delta": sample_std(values),
++                    "better_direction": better_when,
++                    "descriptive_interpretation": (
++                        "improves metric on average"
++                        if (mean_delta > 0 and better_when == "positive")
++                        or (mean_delta < 0 and better_when == "negative")
++                        else "worsens metric on average"
++                    ),
++                }
++            )
++    return effects
++
++
++def markdown_table(summaries: List[Dict[str, Any]], selected: str) -> str:
++    lines = [
++        "| Variant | M | S | B | D | Dice | IoU | HD95 | ASSD | BF1 | Params (M) | GFLOPs |",
++        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
++    ]
++    for row in summaries:
++        label = f"**{row['variant']}**" if row["variant"] == selected else row["variant"]
++        cells = [label, row["multiscale"], row["skip_se"], row["boundary"], row["deep_supervision"]]
++        for metric in ["dice", "iou", "hd95", "assd", "boundary_f1"]:
++            cells.append(
++                f"{row[f'{metric}_mean']:.4f} ± {row[f'{metric}_std']:.4f}"
++            )
++        cells.append(f"{row.get('params_mean', float('nan')) / 1e6:.3f}")
++        cells.append(f"{row.get('gflops_mean', float('nan')):.3f}")
++        lines.append("| " + " | ".join(map(str, cells)) + " |")
++    return "\n".join(lines)
++
++
++def main() -> None:
++    args = parse_args()
++    manifest_path = Path(args.manifest)
++    lock_path = Path(args.lock)
++    output_dir = Path(args.output_dir)
++    if not lock_path.exists():
++        raise FileNotFoundError("Architecture selection lock is required before summarizing test results.")
++    lock = json.loads(lock_path.read_text(encoding="utf-8"))
++    with manifest_path.open("r", encoding="utf-8") as handle:
++        manifest = yaml.safe_load(handle)
++
++    per_run: List[Dict[str, Any]] = []
++    missing: List[str] = []
++    for run in manifest["runs"]:
++        result_path = Path(run["output_dir"]) / "eval" / "test_results.json"
++        if not result_path.exists():
++            missing.append(str(result_path))
++            continue
++        results = json.loads(result_path.read_text(encoding="utf-8"))
++        row: Dict[str, Any] = {
++            "variant": run["variant"],
++            "seed": int(run["seed"]),
++            "multiscale": int(run["multiscale"]),
++            "skip_se": int(run["skip_se"]),
++            "boundary": int(run["boundary"]),
++            "deep_supervision": int(run["deep_supervision"]),
++            "result_path": str(result_path),
++        }
++        for metric in METRICS:
++            row[metric] = results.get(metric)
++        per_run.append(row)
++
++    if args.require_all_test_results and missing:
++        raise FileNotFoundError("Missing test results:\n" + "\n".join(missing))
++    if not per_run:
++        raise RuntimeError("No test results were found. Evaluate the locked selection first.")
++
++    summaries = variant_summary(per_run)
++    effects = paired_factorial_effects(per_run)
++    output_dir.mkdir(parents=True, exist_ok=True)
++    write_csv(per_run, output_dir / "test_per_run.csv")
++    write_csv(summaries, output_dir / "test_architecture_summary.csv")
++    write_csv(effects, output_dir / "factorial_effects.csv")
++
++    selected = lock["selected_variant"]
++    report_lines = [
++        "# Validation-locked factorial ablation report",
++        "",
++        f"Selected architecture before test evaluation: **{selected}**.",
++        "",
++        "The architecture was selected from validation metrics only. The table below is post-lock test evidence and was not used to choose the model.",
++        "",
++        markdown_table(summaries, selected),
++        "",
++        "## Factorial contrasts",
++        "",
++        "Raw deltas are paired by training seed. Positive is favorable for Dice/IoU/BF1; negative is favorable for HD95/ASSD. With three seeds, these contrasts are descriptive and should not be presented as definitive significance tests.",
++        "",
++        "| Metric | Effect | Mean raw delta | SD across seeds | Interpretation |",
++        "|---|---|---:|---:|---|",
++    ]
++    for row in effects:
++        report_lines.append(
++            f"| {row['metric']} | {row['effect']} | {row['mean_raw_delta']:.6f} | "
++            f"{row['std_raw_delta']:.6f} | {row['descriptive_interpretation']} |"
++        )
++    if missing:
++        report_lines.extend(
++            [
++                "",
++                "## Missing runs",
++                "",
++                *[f"- `{path}`" for path in missing],
++            ]
++        )
++    (output_dir / "factorial_report.md").write_text("\n".join(report_lines), encoding="utf-8")
++    print(f"Saved summaries to: {output_dir}")
++
++
++if __name__ == "__main__":
++    main()
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/tests/test_validation_selection.py /mnt/data/archive_review/tests/test_validation_selection.py
+--- /mnt/data/archive_original/tests/test_validation_selection.py	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/archive_review/tests/test_validation_selection.py	2026-08-03 09:57:14.155626947 +0000
+@@ -0,0 +1,76 @@
++import unittest
++
++from utils.selection import compare_metric_dicts, normalize_selection_policy
++
++
++class ValidationSelectionTests(unittest.TestCase):
++    def setUp(self):
++        self.policy = normalize_selection_policy(
++            {
++                "primary": {"metric": "dice", "mode": "max", "tolerance": 0.001},
++                "tie_breakers": [
++                    {"metric": "missing_prediction_rate", "mode": "min"},
++                    {"metric": "hd95", "mode": "min"},
++                    {"metric": "assd", "mode": "min"},
++                    {"metric": "boundary_f1", "mode": "max"},
++                ],
++            }
++        )
++
++    def test_surface_candidate_can_win_inside_predeclared_dice_tolerance(self):
++        incumbent = {
++            "dice": 0.8760,
++            "missing_prediction_rate": 0.0,
++            "hd95": 7.30,
++            "assd": 2.58,
++            "boundary_f1": 0.864,
++        }
++        candidate = {
++            "dice": 0.8752,
++            "missing_prediction_rate": 0.0,
++            "hd95": 7.15,
++            "assd": 2.47,
++            "boundary_f1": 0.862,
++        }
++        selected, _ = compare_metric_dicts(candidate, incumbent, self.policy)
++        self.assertTrue(selected)
++
++    def test_candidate_outside_dice_tolerance_cannot_win_on_surface(self):
++        incumbent = {
++            "dice": 0.8760,
++            "missing_prediction_rate": 0.0,
++            "hd95": 7.30,
++            "assd": 2.58,
++            "boundary_f1": 0.864,
++        }
++        candidate = {
++            "dice": 0.8740,
++            "missing_prediction_rate": 0.0,
++            "hd95": 6.00,
++            "assd": 2.00,
++            "boundary_f1": 0.870,
++        }
++        selected, _ = compare_metric_dicts(candidate, incumbent, self.policy)
++        self.assertFalse(selected)
++
++    def test_missing_prediction_rate_precedes_surface_tie_breakers(self):
++        incumbent = {
++            "dice": 0.8755,
++            "missing_prediction_rate": 0.0,
++            "hd95": 7.5,
++            "assd": 2.6,
++            "boundary_f1": 0.86,
++        }
++        candidate = {
++            "dice": 0.8758,
++            "missing_prediction_rate": 0.01,
++            "hd95": 6.0,
++            "assd": 2.0,
++            "boundary_f1": 0.87,
++        }
++        selected, _ = compare_metric_dicts(candidate, incumbent, self.policy)
++        self.assertFalse(selected)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/train.py /mnt/data/archive_review/train.py
+--- /mnt/data/archive_original/train.py	2026-07-30 01:26:02.000000000 +0000
++++ /mnt/data/archive_review/train.py	2026-08-03 09:55:21.447630896 +0000
+@@ -1,26 +1,36 @@
+ import argparse
+ import csv
++import hashlib
++import json
++import math
+ from pathlib import Path
+ 
+ import torch
+-from torch.utils.data import DataLoader, random_split
++from torch.utils.data import DataLoader, Subset
+ from tqdm import tqdm
+ 
+ from datasets import NPYSliceDataset
+ from losses import CombinedSegBoundaryLoss
+ from models import build_model
+-from utils.metrics import AverageMeter, dice_score_from_logits, iou_score_from_logits, batch_surface_metrics, precision_recall_fbeta_from_logits
+-from utils.misc import ensure_dir, load_config, set_seed, count_parameters
++from utils.metrics import AverageMeter, dice_score_from_logits, iou_score_from_logits, precision_recall_fbeta_from_logits, segmentation_metrics_per_sample_from_logits
++from utils.misc import ensure_dir, load_config, set_seed, count_parameters, save_json
+ from utils.visualization import save_prediction_grid
++from utils.selection import compare_metric_dicts, normalize_selection_policy
+ 
+ 
+ def make_loaders(cfg):
++    """Build a fixed, auditable train/validation split.
++
++    The training seed controls model initialization and augmentation randomness,
++    while ``training.split_seed`` controls the split.  Keeping split_seed fixed
++    across every factorial cell is essential for paired architecture selection.
++    """
+     tcfg = cfg["training"]
+     acfg = cfg.get("augmentation", {})
+     mcfg = cfg["model"]
+     paths = cfg["paths"]
+ 
+-    full_dataset = NPYSliceDataset(
++    base_dataset = NPYSliceDataset(
+         paths["x_train"],
+         paths["y_train"],
+         image_size=tcfg.get("image_size", 256),
+@@ -30,16 +40,29 @@
+     )
+ 
+     val_ratio = float(tcfg.get("val_ratio", 0.15))
+-    val_len = max(1, int(len(full_dataset) * val_ratio))
+-    train_len = len(full_dataset) - val_len
+-    train_subset, val_subset = random_split(
+-        full_dataset,
+-        lengths=[train_len, val_len],
+-        generator=torch.Generator().manual_seed(tcfg.get("split_seed", cfg.get("seed", 42))),
+-    )
++    if not 0.0 < val_ratio < 1.0:
++        raise ValueError(f"training.val_ratio must be in (0, 1), got {val_ratio}")
++    split_seed = int(tcfg.get("split_seed", 42))
++    val_len = max(1, int(len(base_dataset) * val_ratio))
++    train_len = len(base_dataset) - val_len
++
++    generator = torch.Generator().manual_seed(split_seed)
++    permutation = torch.randperm(len(base_dataset), generator=generator).tolist()
++    val_indices = sorted(permutation[:val_len])
++    train_indices = sorted(permutation[val_len:])
++    split_payload = {
++        "dataset_length": len(base_dataset),
++        "train_length": train_len,
++        "validation_length": val_len,
++        "validation_ratio": val_ratio,
++        "split_seed": split_seed,
++        "train_indices": train_indices,
++        "validation_indices": val_indices,
++    }
++    split_bytes = json.dumps(split_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
++    split_payload["split_sha256"] = hashlib.sha256(split_bytes).hexdigest()
+ 
+-    # Enable augmentation on the underlying dataset only during training would also affect val because random_split shares dataset.
+-    # To avoid leakage, create two independent datasets and reuse indices.
++    # Independent dataset objects prevent train augmentations from affecting validation.
+     train_dataset = NPYSliceDataset(
+         paths["x_train"],
+         paths["y_train"],
+@@ -73,9 +96,9 @@
+         normalize="zscore",
+         augment=False,
+     )
+-    train_subset.dataset = train_dataset
+-    val_subset.dataset = val_dataset
+ 
++    train_subset = Subset(train_dataset, train_indices)
++    val_subset = Subset(val_dataset, val_indices)
+     train_loader = DataLoader(
+         train_subset,
+         batch_size=tcfg.get("batch_size", 8),
+@@ -92,7 +115,7 @@
+         pin_memory=True,
+         drop_last=False,
+     )
+-    return train_loader, val_loader
++    return train_loader, val_loader, split_payload
+ 
+ 
+ def train_one_epoch(model, loader, criterion, optimizer, scaler, device, amp=True, threshold=0.5, accumulation_steps=1):
+@@ -138,9 +161,35 @@
+ 
+ 
+ @torch.no_grad()
+-def validate(model, loader, criterion, device, amp=True, threshold=0.5):
++def validate(
++    model,
++    loader,
++    criterion,
++    device,
++    amp=True,
++    threshold=0.5,
++    empty_surface_penalty=None,
++):
++    """Validate with per-case metrics suitable for checkpoint selection.
++
++    HD95/ASSD are undefined when exactly one mask is empty.  Rather than
++    silently dropping those failures, validation selection replaces non-finite
++    distances with a pre-specified finite penalty (the resized image diagonal
++    by default).  The number and rate of missing predictions are also logged.
++    """
+     model.eval()
+-    meters = {k: AverageMeter() for k in ["loss", "seg_loss", "tversky_loss", "component_weight_loss", "hard_negative_loss", "boundary_loss", "deep_loss", "dice", "iou", "precision", "recall", "f2", "hd95", "assd", "boundary_f1"]}
++    loss_names = [
++        "loss", "seg_loss", "tversky_loss", "component_weight_loss",
++        "hard_negative_loss", "boundary_loss", "deep_loss",
++    ]
++    loss_meters = {name: AverageMeter() for name in loss_names}
++    metric_names = [
++        "dice", "iou", "precision", "recall", "f2",
++        "hd95", "assd", "boundary_f1",
++    ]
++    metric_values = {name: [] for name in metric_names}
++    missing_predictions = 0
++    n_cases = 0
+     first_batch = None
+ 
+     for images, masks in tqdm(loader, desc="val", leave=False):
+@@ -152,29 +201,56 @@
+             loss_dict = criterion(outputs, masks)
+ 
+         bs = images.size(0)
+-        meters["loss"].update(loss_dict["loss"].item(), bs)
+-        meters["seg_loss"].update(loss_dict["seg_loss"].item(), bs)
+-        meters["tversky_loss"].update(loss_dict.get("tversky_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
+-        meters["component_weight_loss"].update(loss_dict.get("component_weight_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
+-        meters["hard_negative_loss"].update(loss_dict.get("hard_negative_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
+-        meters["boundary_loss"].update(loss_dict["boundary_loss"].item(), bs)
+-        meters["deep_loss"].update(loss_dict["deep_loss"].item(), bs)
+-        meters["dice"].update(dice_score_from_logits(outputs["seg"], masks, threshold), bs)
+-        meters["iou"].update(iou_score_from_logits(outputs["seg"], masks, threshold), bs)
+-        pr = precision_recall_fbeta_from_logits(outputs["seg"], masks, threshold=threshold, beta=2.0)
+-        meters["precision"].update(pr["precision"], bs)
+-        meters["recall"].update(pr["recall"], bs)
+-        meters["f2"].update(pr["f_beta"], bs)
++        loss_meters["loss"].update(loss_dict["loss"].item(), bs)
++        loss_meters["seg_loss"].update(loss_dict["seg_loss"].item(), bs)
++        loss_meters["tversky_loss"].update(loss_dict.get("tversky_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
++        loss_meters["component_weight_loss"].update(loss_dict.get("component_weight_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
++        loss_meters["hard_negative_loss"].update(loss_dict.get("hard_negative_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
++        loss_meters["boundary_loss"].update(loss_dict["boundary_loss"].item(), bs)
++        loss_meters["deep_loss"].update(loss_dict["deep_loss"].item(), bs)
+ 
+-        surf = batch_surface_metrics(outputs["seg"], masks, threshold=threshold)
+-        meters["hd95"].update(surf["hd95"], bs)
+-        meters["assd"].update(surf["assd"], bs)
+-        meters["boundary_f1"].update(surf["boundary_f1"], bs)
++        per_case = segmentation_metrics_per_sample_from_logits(
++            outputs["seg"], masks, threshold=threshold, beta=2.0
++        )
++        probs = torch.sigmoid(outputs["seg"])
++        pred_empty = ((probs > threshold).flatten(1).sum(dim=1) == 0)
++        target_nonempty = ((masks > 0.5).flatten(1).sum(dim=1) > 0)
++        missing_predictions += int((pred_empty & target_nonempty).sum().item())
++        n_cases += bs
++
++        for name in metric_names:
++            values = [float(value) for value in per_case[name]]
++            if name in {"hd95", "assd"}:
++                if empty_surface_penalty is None:
++                    if any(not math.isfinite(value) for value in values):
++                        raise ValueError(
++                            "Non-finite validation surface distance encountered. "
++                            "Set training.validation_empty_surface_penalty."
++                        )
++                else:
++                    values = [
++                        value if math.isfinite(value) else float(empty_surface_penalty)
++                        for value in values
++                    ]
++            metric_values[name].extend(values)
+ 
+         if first_batch is None:
+-            first_batch = (images.detach().cpu(), masks.detach().cpu(), {k: v.detach().cpu() if torch.is_tensor(v) else v for k, v in outputs.items()})
+-
+-    return {k: v.avg for k, v in meters.items()}, first_batch
++            first_batch = (
++                images.detach().cpu(),
++                masks.detach().cpu(),
++                {k: v.detach().cpu() if torch.is_tensor(v) else v for k, v in outputs.items()},
++            )
++
++    metrics = {name: meter.avg for name, meter in loss_meters.items()}
++    for name, values in metric_values.items():
++        metrics[name] = float(sum(values) / max(len(values), 1))
++    metrics["missing_prediction_count"] = int(missing_predictions)
++    metrics["missing_prediction_rate"] = float(missing_predictions / max(n_cases, 1))
++    metrics["n_validation_cases"] = int(n_cases)
++    metrics["empty_surface_penalty"] = (
++        None if empty_surface_penalty is None else float(empty_surface_penalty)
++    )
++    return metrics, first_batch
+ 
+ 
+ def main():
+@@ -196,7 +272,8 @@
+     ensure_dir(vis_dir)
+ 
+     device = torch.device(args.device)
+-    train_loader, val_loader = make_loaders(cfg)
++    train_loader, val_loader, split_info = make_loaders(cfg)
++    save_json(split_info, out_dir / "data_split.json")
+ 
+     model = build_model(cfg).to(device)
+     print(f"Trainable params: {count_parameters(model):,}")
+@@ -244,12 +321,41 @@
+             "train_loss", "train_seg_loss", "train_tversky_loss", "train_component_weight_loss", "train_hard_negative_loss", "train_boundary_loss", "train_deep_loss",
+             "train_dice", "train_iou", "train_precision", "train_recall", "train_f2",
+             "val_loss", "val_seg_loss", "val_tversky_loss", "val_component_weight_loss", "val_hard_negative_loss", "val_boundary_loss", "val_deep_loss",
+-            "val_dice", "val_iou", "val_precision", "val_recall", "val_f2", "val_hd95", "val_assd", "val_boundary_f1",
++            "val_dice", "val_iou", "val_precision", "val_recall", "val_f2",
++            "val_hd95", "val_assd", "val_boundary_f1",
++            "val_missing_prediction_count", "val_missing_prediction_rate",
+         ])
+ 
+-    best_dice = -1.0
++    selection_policy = normalize_selection_policy(tcfg.get("checkpoint_selection"))
++    best_metrics = None
++    best_epoch = None
+     epochs = int(tcfg.get("epochs", 50))
+     threshold = float(tcfg.get("threshold", 0.5))
++    penalty_cfg = tcfg.get("validation_empty_surface_penalty", "image_diagonal")
++    if isinstance(penalty_cfg, str):
++        if penalty_cfg != "image_diagonal":
++            raise ValueError(
++                "training.validation_empty_surface_penalty must be a number, null, "
++                "or 'image_diagonal'."
++            )
++        image_size = tcfg.get("image_size", 256)
++        if isinstance(image_size, int):
++            height = width = int(image_size)
++        else:
++            height, width = map(int, image_size)
++        empty_surface_penalty = math.hypot(height - 1, width - 1)
++    elif penalty_cfg is None:
++        empty_surface_penalty = None
++    else:
++        empty_surface_penalty = float(penalty_cfg)
++    selection_log_path = out_dir / "checkpoint_selection.csv"
++    selection_fields = [
++        "epoch", "selected", "reason",
++        "dice", "iou", "hd95", "assd", "boundary_f1",
++        "missing_prediction_count", "missing_prediction_rate", "loss",
++    ]
++    with selection_log_path.open("w", newline="", encoding="utf-8") as f:
++        csv.DictWriter(f, fieldnames=selection_fields).writeheader()
+ 
+     for epoch in range(1, epochs + 1):
+         train_metrics = train_one_epoch(
+@@ -258,7 +364,15 @@
+             threshold=threshold,
+             accumulation_steps=tcfg.get("accumulation_steps", 1),
+         )
+-        val_metrics, first_batch = validate(model, val_loader, criterion, device, amp=amp, threshold=threshold)
++        val_metrics, first_batch = validate(
++            model,
++            val_loader,
++            criterion,
++            device,
++            amp=amp,
++            threshold=threshold,
++            empty_surface_penalty=empty_surface_penalty,
++        )
+         scheduler.step()
+ 
+         lr = optimizer.param_groups[0]["lr"]
+@@ -267,7 +381,8 @@
+             f"train_loss={train_metrics['loss']:.4f}, train_dice={train_metrics['dice']:.4f} | "
+             f"val_loss={val_metrics['loss']:.4f}, val_dice={val_metrics['dice']:.4f}, "
+             f"val_iou={val_metrics['iou']:.4f}, recall={val_metrics['recall']:.4f}, "
+-            f"hd95={val_metrics['hd95']:.3f}, assd={val_metrics['assd']:.3f}"
++            f"hd95={val_metrics['hd95']:.3f}, assd={val_metrics['assd']:.3f}, "
++            f"missing={val_metrics['missing_prediction_rate']:.2%}"
+         )
+ 
+         with open(log_path, "a", newline="", encoding="utf-8") as f:
+@@ -279,34 +394,96 @@
+                 val_metrics["loss"], val_metrics["seg_loss"], val_metrics["tversky_loss"], val_metrics["component_weight_loss"], val_metrics["hard_negative_loss"], val_metrics["boundary_loss"], val_metrics["deep_loss"],
+                 val_metrics["dice"], val_metrics["iou"], val_metrics["precision"], val_metrics["recall"], val_metrics["f2"],
+                 val_metrics["hd95"], val_metrics["assd"], val_metrics["boundary_f1"],
++                val_metrics["missing_prediction_count"], val_metrics["missing_prediction_rate"],
+             ])
+ 
+         if first_batch is not None and (epoch == 1 or epoch % int(tcfg.get("save_every", 10)) == 0):
+             images, masks, cpu_outputs = first_batch
+             save_prediction_grid(images, masks, cpu_outputs, vis_dir / f"epoch_{epoch:03d}.png", threshold=threshold)
+ 
+-        is_best = val_metrics["dice"] > best_dice
+-        if is_best:
+-            best_dice = val_metrics["dice"]
+-            torch.save({
++        eligible = epoch >= selection_policy.get("min_epoch", 1)
++        selected, reason = (False, "epoch below selection min_epoch")
++        if eligible:
++            selected, reason = compare_metric_dicts(val_metrics, best_metrics, selection_policy)
++
++        selection_row = {
++            "epoch": epoch,
++            "selected": int(selected),
++            "reason": reason,
++            "dice": val_metrics["dice"],
++            "iou": val_metrics["iou"],
++            "hd95": val_metrics["hd95"],
++            "assd": val_metrics["assd"],
++            "boundary_f1": val_metrics["boundary_f1"],
++            "missing_prediction_count": val_metrics["missing_prediction_count"],
++            "missing_prediction_rate": val_metrics["missing_prediction_rate"],
++            "loss": val_metrics["loss"],
++        }
++        with selection_log_path.open("a", newline="", encoding="utf-8") as f:
++            csv.DictWriter(f, fieldnames=selection_fields).writerow(selection_row)
++
++        if selected:
++            best_metrics = dict(val_metrics)
++            best_epoch = epoch
++            checkpoint = {
+                 "epoch": epoch,
+                 "model_state": model.state_dict(),
+                 "optimizer_state": optimizer.state_dict(),
+-                "best_dice": best_dice,
++                "best_dice": best_metrics["dice"],  # backward compatibility
++                "best_validation_metrics": best_metrics,
++                "checkpoint_selection_policy": selection_policy,
++                "selection_reason": reason,
++                "validation_metric_policy": {
++                    "threshold": threshold,
++                    "empty_surface_penalty": empty_surface_penalty,
++                    "surface_space": "resized pixel coordinates",
++                },
++                "split_sha256": split_info["split_sha256"],
+                 "cfg": cfg,
+-            }, ckpt_dir / "best.pth")
+-            print(f"Saved best checkpoint: val_dice={best_dice:.4f}")
++            }
++            torch.save(checkpoint, ckpt_dir / "best_validation.pth")
++            # Keep the legacy path so existing evaluation commands continue to work.
++            torch.save(checkpoint, ckpt_dir / "best.pth")
++            save_json({
++                "best_epoch": best_epoch,
++                "best_validation_metrics": best_metrics,
++                "checkpoint_selection_policy": selection_policy,
++                "selection_reason": reason,
++                "validation_metric_policy": {
++                    "threshold": threshold,
++                    "empty_surface_penalty": empty_surface_penalty,
++                    "surface_space": "resized pixel coordinates",
++                },
++                "split_sha256": split_info["split_sha256"],
++                "training_seed": int(cfg.get("seed", 42)),
++                "split_seed": int(tcfg.get("split_seed", 42)),
++                "experiment": cfg.get("experiment", {}),
++            }, out_dir / "validation_best.json")
++            print(
++                "Saved validation-selected checkpoint: "
++                f"epoch={best_epoch}, dice={best_metrics['dice']:.4f}, "
++                f"hd95={best_metrics['hd95']:.3f}, assd={best_metrics['assd']:.3f}"
++            )
+ 
+         if epoch % int(tcfg.get("save_every", 10)) == 0:
+             torch.save({
+                 "epoch": epoch,
+                 "model_state": model.state_dict(),
+                 "optimizer_state": optimizer.state_dict(),
+-                "best_dice": best_dice,
++                "best_dice": None if best_metrics is None else best_metrics["dice"],
++                "best_validation_metrics": best_metrics,
++                "checkpoint_selection_policy": selection_policy,
++                "split_sha256": split_info["split_sha256"],
+                 "cfg": cfg,
+             }, ckpt_dir / f"epoch_{epoch:03d}.pth")
+ 
+-    print(f"Done. Best val Dice: {best_dice:.4f}. Log: {log_path}")
++    if best_metrics is None:
++        raise RuntimeError("No checkpoint satisfied the validation selection policy.")
++    print(
++        f"Done. Validation-selected epoch: {best_epoch}. "
++        f"Dice={best_metrics['dice']:.4f}, HD95={best_metrics['hd95']:.3f}, "
++        f"ASSD={best_metrics['assd']:.3f}. Log: {log_path}"
++    )
+ 
+ 
+ if __name__ == "__main__":
+diff -ruN '--exclude=__MACOSX' '--exclude=.DS_Store' '--exclude=factorial' '--exclude=validation_factorial_code_changes.patch' /mnt/data/archive_original/utils/selection.py /mnt/data/archive_review/utils/selection.py
+--- /mnt/data/archive_original/utils/selection.py	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/archive_review/utils/selection.py	2026-08-03 09:55:08.227631359 +0000
+@@ -0,0 +1,146 @@
++"""Validation-only checkpoint and architecture selection utilities.
++
++The functions in this module deliberately avoid test metrics.  They implement
++an auditable, pre-specified lexicographic policy:
++
++1. maximise the primary validation metric (Dice by default);
++2. when candidates are within the configured Dice tolerance, minimise HD95;
++3. then minimise ASSD;
++4. then maximise Boundary-F1;
++5. finally prefer the earlier epoch / deterministic name.
++
++The policy is stored in every checkpoint and selection lock so the final test
++set can be evaluated only after the decision has been frozen.
++"""
++
++from __future__ import annotations
++
++import math
++from copy import deepcopy
++from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
++
++
++DEFAULT_SELECTION_POLICY: Dict[str, Any] = {
++    "primary": {"metric": "dice", "mode": "max", "tolerance": 0.001},
++    "tie_breakers": [
++        {"metric": "missing_prediction_rate", "mode": "min", "tolerance": 0.0},
++        {"metric": "hd95", "mode": "min", "tolerance": 0.0},
++        {"metric": "assd", "mode": "min", "tolerance": 0.0},
++        {"metric": "boundary_f1", "mode": "max", "tolerance": 0.0},
++    ],
++    "min_epoch": 1,
++}
++
++
++def normalize_selection_policy(policy: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
++    """Return a validated policy with defaults filled in."""
++    out = deepcopy(DEFAULT_SELECTION_POLICY)
++    if policy:
++        for key, value in policy.items():
++            if key == "primary" and isinstance(value, Mapping):
++                out["primary"].update(value)
++            elif key == "tie_breakers":
++                out["tie_breakers"] = [dict(item) for item in value]
++            else:
++                out[key] = value
++
++    criteria = [out["primary"], *out.get("tie_breakers", [])]
++    for criterion in criteria:
++        if not criterion.get("metric"):
++            raise ValueError(f"Selection criterion has no metric: {criterion}")
++        if criterion.get("mode") not in {"max", "min"}:
++            raise ValueError(f"Selection mode must be 'max' or 'min': {criterion}")
++        criterion["tolerance"] = float(criterion.get("tolerance", 0.0))
++    out["min_epoch"] = int(out.get("min_epoch", 1))
++    return out
++
++
++def _is_finite(value: Any) -> bool:
++    try:
++        return math.isfinite(float(value))
++    except (TypeError, ValueError):
++        return False
++
++
++def compare_values(candidate: Any, incumbent: Any, mode: str, tolerance: float = 0.0) -> int:
++    """Compare two scalar values.
++
++    Returns
++    -------
++    1
++        Candidate is better.
++    0
++        Values are tied within tolerance.
++    -1
++        Candidate is worse.
++
++    Finite values are always preferred to NaN/inf values.
++    """
++    c_finite = _is_finite(candidate)
++    i_finite = _is_finite(incumbent)
++    if c_finite and not i_finite:
++        return 1
++    if i_finite and not c_finite:
++        return -1
++    if not c_finite and not i_finite:
++        return 0
++
++    c = float(candidate)
++    i = float(incumbent)
++    tol = max(0.0, float(tolerance))
++    delta = c - i
++    if abs(delta) <= tol:
++        return 0
++    if mode == "max":
++        return 1 if delta > 0 else -1
++    return 1 if delta < 0 else -1
++
++
++def compare_metric_dicts(
++    candidate: Mapping[str, Any],
++    incumbent: Optional[Mapping[str, Any]],
++    policy: Mapping[str, Any],
++) -> Tuple[bool, str]:
++    """Return whether candidate should replace incumbent under the policy."""
++    normalized = normalize_selection_policy(policy)
++    if incumbent is None:
++        return True, "first eligible candidate"
++
++    criteria: List[Mapping[str, Any]] = [
++        normalized["primary"],
++        *normalized.get("tie_breakers", []),
++    ]
++    for criterion in criteria:
++        metric = criterion["metric"]
++        result = compare_values(
++            candidate.get(metric),
++            incumbent.get(metric),
++            mode=criterion["mode"],
++            tolerance=criterion.get("tolerance", 0.0),
++        )
++        if result > 0:
++            return True, f"better validation {metric} ({criterion['mode']})"
++        if result < 0:
++            return False, f"worse validation {metric} ({criterion['mode']})"
++
++    # Exact/tolerance tie: keep the earlier incumbent to avoid post-hoc drift.
++    return False, "tied under the pre-specified policy; retained earlier checkpoint"
++
++
++def ranking_key(metrics: Mapping[str, Any], policy: Mapping[str, Any]) -> Tuple[Any, ...]:
++    """Create a deterministic sorting key (best first when used with sorted)."""
++    normalized = normalize_selection_policy(policy)
++    key: List[Any] = []
++    criteria: Iterable[Mapping[str, Any]] = [
++        normalized["primary"],
++        *normalized.get("tie_breakers", []),
++    ]
++    for criterion in criteria:
++        value = metrics.get(criterion["metric"])
++        if not _is_finite(value):
++            key.extend([1, 0.0])
++            continue
++        v = float(value)
++        key.extend([0, -v if criterion["mode"] == "max" else v])
++    key.append(str(metrics.get("variant", metrics.get("name", ""))))
++    return tuple(key)
