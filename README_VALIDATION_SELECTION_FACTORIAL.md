@@ -92,7 +92,11 @@ source .venv/bin/activate        # Linux/macOS
 
 pip install -r requirements.txt
 ```
-
+Tải dữ liệu: 
+```bash
+chmod -R +x scripts
+./scripts/download_data.sh
+```
 Kiểm tra dữ liệu:
 
 ```bash
