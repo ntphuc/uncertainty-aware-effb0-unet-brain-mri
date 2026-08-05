@@ -120,7 +120,7 @@ def make_loaders(cfg):
 
 def train_one_epoch(model, loader, criterion, optimizer, scaler, device, amp=True, threshold=0.5, accumulation_steps=1):
     model.train()
-    meters = {k: AverageMeter() for k in ["loss", "seg_loss", "tversky_loss", "component_weight_loss", "hard_negative_loss", "boundary_loss", "deep_loss", "dice", "iou", "precision", "recall", "f2"]}
+    meters = {k: AverageMeter() for k in ["loss", "seg_loss", "tversky_loss", "component_weight_loss", "hard_negative_loss", "boundary_loss", "boundary_guide_loss", "deep_loss", "dice", "iou", "precision", "recall", "f2"]}
 
     accumulation_steps = max(1, int(accumulation_steps))
     optimizer.zero_grad(set_to_none=True)
@@ -149,6 +149,7 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, device, amp=Tru
         meters["component_weight_loss"].update(loss_dict.get("component_weight_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
         meters["hard_negative_loss"].update(loss_dict.get("hard_negative_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
         meters["boundary_loss"].update(loss_dict["boundary_loss"].item(), bs)
+        meters["boundary_guide_loss"].update(loss_dict.get("boundary_guide_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
         meters["deep_loss"].update(loss_dict["deep_loss"].item(), bs)
         meters["dice"].update(dice_score_from_logits(outputs["seg"], masks, threshold), bs)
         meters["iou"].update(iou_score_from_logits(outputs["seg"], masks, threshold), bs)
@@ -180,7 +181,7 @@ def validate(
     model.eval()
     loss_names = [
         "loss", "seg_loss", "tversky_loss", "component_weight_loss",
-        "hard_negative_loss", "boundary_loss", "deep_loss",
+        "hard_negative_loss", "boundary_loss", "boundary_guide_loss", "deep_loss",
     ]
     loss_meters = {name: AverageMeter() for name in loss_names}
     metric_names = [
@@ -207,6 +208,7 @@ def validate(
         loss_meters["component_weight_loss"].update(loss_dict.get("component_weight_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
         loss_meters["hard_negative_loss"].update(loss_dict.get("hard_negative_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
         loss_meters["boundary_loss"].update(loss_dict["boundary_loss"].item(), bs)
+        loss_meters["boundary_guide_loss"].update(loss_dict.get("boundary_guide_loss", torch.tensor(0.0, device=masks.device)).item(), bs)
         loss_meters["deep_loss"].update(loss_dict["deep_loss"].item(), bs)
 
         per_case = segmentation_metrics_per_sample_from_logits(
@@ -281,6 +283,7 @@ def main():
     lcfg = cfg["loss"]
     criterion = CombinedSegBoundaryLoss(
         lambda_boundary=lcfg.get("lambda_boundary", 0.15),
+        lambda_boundary_guide=lcfg.get("lambda_boundary_guide", 0.0),
         beta_deep_supervision=lcfg.get("beta_deep_supervision", 0.25),
         boundary_kernel_size=lcfg.get("boundary_kernel_size", 3),
         gamma_tversky=lcfg.get("gamma_tversky", 0.0),

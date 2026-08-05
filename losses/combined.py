@@ -30,6 +30,7 @@ class CombinedSegBoundaryLoss(nn.Module):
     def __init__(
         self,
         lambda_boundary: float = 0.15,
+        lambda_boundary_guide: float = 0.0,
         beta_deep_supervision: float = 0.25,
         boundary_kernel_size: int = 3,
         gamma_tversky: float = 0.0,
@@ -56,6 +57,7 @@ class CombinedSegBoundaryLoss(nn.Module):
         self.boundary_loss = BoundaryLoss()
         self.deep_loss = DeepSupervisionLoss()
         self.lambda_boundary = float(lambda_boundary)
+        self.lambda_boundary_guide = float(lambda_boundary_guide)
         self.beta_deep_supervision = float(beta_deep_supervision)
         self.boundary_kernel_size = int(boundary_kernel_size)
         self.gamma_tversky = float(gamma_tversky)
@@ -104,7 +106,14 @@ class CombinedSegBoundaryLoss(nn.Module):
         else:
             loss_hard_negative = masks.new_tensor(0.0)
 
-        if outputs.get("boundary") is not None and self.lambda_boundary > 0:
+        needs_boundary_target = (
+            (outputs.get("boundary") is not None and self.lambda_boundary > 0)
+            or (
+                outputs.get("boundary_guide") is not None
+                and self.lambda_boundary_guide > 0
+            )
+        )
+        if needs_boundary_target:
             if self.use_soft_boundary:
                 boundary_gt = mask_to_soft_boundary(
                     masks,
@@ -114,9 +123,23 @@ class CombinedSegBoundaryLoss(nn.Module):
                 )
             else:
                 boundary_gt = mask_to_boundary(masks, kernel_size=self.boundary_kernel_size)
+        else:
+            boundary_gt = None
+
+        if outputs.get("boundary") is not None and self.lambda_boundary > 0:
             loss_boundary = self.boundary_loss(outputs["boundary"], boundary_gt)
         else:
             loss_boundary = masks.new_tensor(0.0)
+
+        if (
+            outputs.get("boundary_guide") is not None
+            and self.lambda_boundary_guide > 0
+        ):
+            loss_boundary_guide = self.boundary_loss(
+                outputs["boundary_guide"], boundary_gt
+            )
+        else:
+            loss_boundary_guide = masks.new_tensor(0.0)
 
         loss_deep = self.deep_loss(outputs.get("deep_outputs", []), masks)
 
@@ -126,6 +149,7 @@ class CombinedSegBoundaryLoss(nn.Module):
             + self.component_weight_lambda * loss_component_weight
             + self.lambda_hard_negative * loss_hard_negative
             + self.lambda_boundary * loss_boundary
+            + self.lambda_boundary_guide * loss_boundary_guide
             + self.beta_deep_supervision * loss_deep
         )
         return {
@@ -135,5 +159,6 @@ class CombinedSegBoundaryLoss(nn.Module):
             "component_weight_loss": loss_component_weight.detach(),
             "hard_negative_loss": loss_hard_negative.detach(),
             "boundary_loss": loss_boundary.detach(),
+            "boundary_guide_loss": loss_boundary_guide.detach(),
             "deep_loss": loss_deep.detach(),
         }

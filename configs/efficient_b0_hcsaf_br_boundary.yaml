@@ -1,0 +1,109 @@
+project_name: HCSAF_BR_UNet_EfficientB0_Boundary
+seed: 42
+
+paths:
+  x_train: datasets/brisc2025/X_train.npy
+  y_train: datasets/brisc2025/Y_train.npy
+  x_test: datasets/brisc2025/X_test.npy
+  y_test: datasets/brisc2025/Y_test.npy
+  output_dir: outputs/hcsaf_br
+
+model:
+  name: efficientnet_b0_unet_hcsaf_br
+  encoder_name: efficientnet_b0
+  pretrained: true
+  in_channels: 1
+  num_classes: 1
+  decoder_channels: [256, 160, 96, 64, 32]
+
+  use_multiscale: true
+  fusion_type: hcsaf_br
+
+  # Shared width for all projected encoder scales and HCSAF output.
+  hcsaf_channels: 64
+
+  # Per-scale channel reliability MLP: 2C -> hidden -> C.
+  hcsaf_channel_hidden_channels: 32
+
+  # Lightweight spatial reliability scorer width.
+  hcsaf_spatial_hidden_channels: 8
+
+  # Softmax temperature across the five encoder scales.
+  hcsaf_temperature: 1.0
+
+  # Initial adaptive/uniform mixture. 0.8 starts with 80% adaptive fusion and
+  # 20% uniform fusion to reduce early scale-weight collapse.
+  hcsaf_adaptive_init: 0.8
+
+  # Decoder stage order is [D4, D3, D2, D1] -> indices [0, 1, 2, 3].
+  # Spatial reliability is only enabled at high-resolution D2/D1 stages.
+  hcsaf_spatial_stage_indices: [2, 3]
+
+  # Learned residual upsampling is used only for D2 -> D1. Earlier stages keep
+  # bilinear upsampling for lower cost and a cleaner hierarchical design.
+  hcsaf_learned_upsample_stage_indices: [3]
+  hcsaf_use_learned_final_upsample: true
+
+  # Full-resolution boundary-guided residual refinement.
+  hcsaf_use_boundary_refinement: true
+  hcsaf_upsample_residual_init: 0.1
+  hcsaf_boundary_residual_init: 0.1
+
+  # Uncomment to enforce the channel assumption used in the paper. Exact
+  # channels depend on timm version and feature taps.
+  # expected_encoder_channels: [24, 40, 80, 112, 320]
+
+  # Existing components are preserved.
+  use_se: true
+  use_boundary_head: true
+  use_deep_supervision: true
+
+training:
+  image_size: 256
+  batch_size: 8
+  num_workers: 2
+  epochs: 50
+  val_ratio: 0.15
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  amp: true
+  threshold: 0.5
+  save_every: 10
+
+  # Keep this fixed for every architecture and training seed.
+  split_seed: 42
+  deterministic: true
+
+  # Validation-only checkpoint selection. Test data must remain untouched until
+  # SELECTION_LOCK.json is created by the validation-locked pipeline.
+  checkpoint_selection:
+    primary:
+      metric: dice
+      mode: max
+      tolerance: 0.001
+    tie_breakers:
+      - metric: missing_prediction_rate
+        mode: min
+        tolerance: 0.0
+      - metric: hd95
+        mode: min
+        tolerance: 0.0
+      - metric: assd
+        mode: min
+        tolerance: 0.0
+      - metric: boundary_f1
+        mode: max
+        tolerance: 0.0
+    min_epoch: 1
+  validation_empty_surface_penalty: image_diagonal
+
+loss:
+  lambda_boundary: 0.15
+  lambda_boundary_guide: 0.05
+  beta_deep_supervision: 0.25
+  boundary_kernel_size: 3
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  random_rotate90: true

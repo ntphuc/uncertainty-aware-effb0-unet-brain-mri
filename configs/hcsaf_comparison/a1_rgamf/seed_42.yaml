@@ -1,0 +1,81 @@
+project_name: HCSAF_comparison_a1_rgamf_seed_42
+seed: 42
+paths:
+  x_train: datasets/brisc2025/X_train.npy
+  y_train: datasets/brisc2025/Y_train.npy
+  x_test: datasets/brisc2025/X_test.npy
+  y_test: datasets/brisc2025/Y_test.npy
+  output_dir: outputs/hcsaf_comparison/a1_rgamf/seed_42
+model:
+  name: efficientnet_b0_unet_rgamf
+  encoder_name: efficientnet_b0
+  pretrained: true
+  in_channels: 1
+  num_classes: 1
+  decoder_channels:
+  - 256
+  - 160
+  - 96
+  - 64
+  - 32
+  use_multiscale: true
+  fusion_type: rgamf
+  hcsaf_channels: 64
+  hcsaf_channel_hidden_channels: 32
+  hcsaf_spatial_hidden_channels: 8
+  hcsaf_temperature: 1.0
+  hcsaf_adaptive_init: 0.8
+  hcsaf_spatial_stage_indices:
+  - 2
+  - 3
+  hcsaf_learned_upsample_stage_indices:
+  - 3
+  hcsaf_use_learned_final_upsample: true
+  hcsaf_use_boundary_refinement: true
+  hcsaf_upsample_residual_init: 0.1
+  hcsaf_boundary_residual_init: 0.1
+  use_se: true
+  use_boundary_head: true
+  use_deep_supervision: true
+training:
+  image_size: 256
+  batch_size: 8
+  num_workers: 2
+  epochs: 50
+  val_ratio: 0.15
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  amp: true
+  threshold: 0.5
+  save_every: 10
+  split_seed: 42
+  deterministic: true
+  checkpoint_selection:
+    primary:
+      metric: dice
+      mode: max
+      tolerance: 0.001
+    tie_breakers:
+    - metric: missing_prediction_rate
+      mode: min
+      tolerance: 0.0
+    - metric: hd95
+      mode: min
+      tolerance: 0.0
+    - metric: assd
+      mode: min
+      tolerance: 0.0
+    - metric: boundary_f1
+      mode: max
+      tolerance: 0.0
+    min_epoch: 1
+  validation_empty_surface_penalty: image_diagonal
+loss:
+  lambda_boundary: 0.15
+  lambda_boundary_guide: 0.05
+  beta_deep_supervision: 0.25
+  boundary_kernel_size: 3
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  random_rotate90: true

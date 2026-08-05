@@ -35,6 +35,8 @@ def build_model(cfg):
 
     Legacy/custom model.name values:
       - efficientnet_b0_unet_boundary
+      - efficientnet_b0_unet_rgamf
+      - efficientnet_b0_unet_hcsaf_br
       - unet
       - unetpp
       - transunet
@@ -52,12 +54,20 @@ def build_model(cfg):
         "efficientnet_b0_unet_rgamf",
         "effb0_rgamf",
         "rgamf_unet",
+        "efficientnet_b0_unet_hcsaf_br",
+        "effb0_hcsaf_br",
+        "hcsaf_br_unet",
     ]:
-        default_fusion_type = (
-            "rgamf"
-            if name in {"efficientnet_b0_unet_rgamf", "effb0_rgamf", "rgamf_unet"}
-            else "concat"
-        )
+        if name in {"efficientnet_b0_unet_rgamf", "effb0_rgamf", "rgamf_unet"}:
+            default_fusion_type = "rgamf"
+        elif name in {
+            "efficientnet_b0_unet_hcsaf_br",
+            "effb0_hcsaf_br",
+            "hcsaf_br_unet",
+        }:
+            default_fusion_type = "hcsaf_br"
+        else:
+            default_fusion_type = "concat"
         return EfficientB0UNetBoundary(
             encoder_name=m.get("encoder_name", "efficientnet_b0"),
             pretrained=m.get("pretrained", True),
@@ -70,6 +80,33 @@ def build_model(cfg):
             rgamf_channels=m.get("rgamf_channels", 64),
             rgamf_hidden_channels=m.get("rgamf_hidden_channels", 32),
             rgamf_temperature=m.get("rgamf_temperature", 1.0),
+            hcsaf_channels=m.get("hcsaf_channels", 64),
+            hcsaf_channel_hidden_channels=m.get(
+                "hcsaf_channel_hidden_channels", 32
+            ),
+            hcsaf_spatial_hidden_channels=m.get(
+                "hcsaf_spatial_hidden_channels", 8
+            ),
+            hcsaf_temperature=m.get("hcsaf_temperature", 1.0),
+            hcsaf_adaptive_init=m.get("hcsaf_adaptive_init", 0.8),
+            hcsaf_spatial_stage_indices=m.get(
+                "hcsaf_spatial_stage_indices", [2, 3]
+            ),
+            hcsaf_learned_upsample_stage_indices=m.get(
+                "hcsaf_learned_upsample_stage_indices", [3]
+            ),
+            hcsaf_use_learned_final_upsample=m.get(
+                "hcsaf_use_learned_final_upsample", True
+            ),
+            hcsaf_use_boundary_refinement=m.get(
+                "hcsaf_use_boundary_refinement", True
+            ),
+            hcsaf_upsample_residual_init=m.get(
+                "hcsaf_upsample_residual_init", 0.1
+            ),
+            hcsaf_boundary_residual_init=m.get(
+                "hcsaf_boundary_residual_init", 0.1
+            ),
             expected_encoder_channels=m.get("expected_encoder_channels", None),
             use_se=m.get("use_se", True),
             use_boundary_head=m.get("use_boundary_head", True),
